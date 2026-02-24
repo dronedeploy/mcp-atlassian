@@ -154,25 +154,24 @@ class TestCommentsMixin:
             comments_mixin.get_issue_comments("TEST-123")
 
     def test_add_comment_basic(self, comments_mixin):
-        """Test add_comment with basic data (Cloud → ADF conversion)."""
-        # Setup mock response
-        comments_mixin.jira.issue_add_comment.return_value = {
+        """Test add_comment with basic data (Cloud → ADF via v3 API)."""
+        # Cloud uses v3 endpoint; mock post (not issue_add_comment)
+        comments_mixin.jira.post.return_value = {
             "id": "10001",
             "body": "This is a comment",
             "created": "2024-01-01T10:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
 
-        # Call the method
         result = comments_mixin.add_comment("TEST-123", "Test comment")
 
-        # On Cloud, _markdown_to_jira returns ADF dict (not wiki markup)
-        call_args = comments_mixin.jira.issue_add_comment.call_args
-        adf_arg = call_args[0][1]
+        # Cloud uses v3: post(endpoint, data={"body": adf_dict})
+        call_args = comments_mixin.jira.post.call_args
+        assert call_args[0][0] == "rest/api/3/issue/TEST-123/comment"
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
         assert adf_arg["type"] == "doc"
-        # preprocessor.markdown_to_jira should NOT be called on Cloud
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["id"] == "10001"
         assert result["body"] == "This is a comment"
@@ -180,9 +179,8 @@ class TestCommentsMixin:
         assert result["author"] == "John Doe"
 
     def test_add_comment_with_markdown_conversion(self, comments_mixin):
-        """Test add_comment with markdown conversion (Cloud → ADF)."""
-        # Setup mock response
-        comments_mixin.jira.issue_add_comment.return_value = {
+        """Test add_comment with markdown conversion (Cloud → ADF via v3)."""
+        comments_mixin.jira.post.return_value = {
             "id": "10001",
             "body": "Heading and content",
             "created": "2024-01-01T10:00:00.000+0000",
@@ -190,61 +188,54 @@ class TestCommentsMixin:
         }
 
         markdown_comment = "# Heading 1\n\nThis is **bold** text."
-
-        # Call the method
         result = comments_mixin.add_comment("TEST-123", markdown_comment)
 
-        # On Cloud, should produce ADF, not call preprocessor
-        call_args = comments_mixin.jira.issue_add_comment.call_args
-        adf_arg = call_args[0][1]
+        call_args = comments_mixin.jira.post.call_args
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == "Heading and content"
 
     def test_add_comment_with_empty_comment(self, comments_mixin):
-        """Test add_comment with an empty comment (Cloud → minimal ADF)."""
-        # Setup mock response
-        comments_mixin.jira.issue_add_comment.return_value = {
+        """Test add_comment with an empty comment (Cloud → minimal ADF via v3)."""
+        comments_mixin.jira.post.return_value = {
             "id": "10001",
             "body": "",
             "created": "2024-01-01T10:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
 
-        # Call the method with empty comment
         result = comments_mixin.add_comment("TEST-123", "")
 
-        # On Cloud, empty string produces a minimal ADF dict
-        call_args = comments_mixin.jira.issue_add_comment.call_args
-        adf_arg = call_args[0][1]
+        call_args = comments_mixin.jira.post.call_args
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == ""
 
     def test_add_comment_with_restricted_visibility(self, comments_mixin):
-        """Test add_comment with visibility set (Cloud → ADF)."""
-        # Setup mock response
-        comments_mixin.jira.issue_add_comment.return_value = {
+        """Test add_comment with visibility set (Cloud → ADF via v3)."""
+        comments_mixin.jira.post.return_value = {
             "id": "10001",
             "body": "This is a comment",
             "created": "2024-01-01T10:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
 
-        # Call the method
         result = comments_mixin.add_comment(
             "TEST-123", "Test comment", {"type": "group", "value": "restricted"}
         )
 
-        # Verify ADF conversion on Cloud
-        call_args = comments_mixin.jira.issue_add_comment.call_args
-        adf_arg = call_args[0][1]
+        call_args = comments_mixin.jira.post.call_args
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
-        visibility_arg = call_args[0][2]
-        assert visibility_arg == {"type": "group", "value": "restricted"}
+        assert call_args[1]["data"]["visibility"] == {
+            "type": "group",
+            "value": "restricted",
+        }
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["id"] == "10001"
         assert result["body"] == "This is a comment"
@@ -252,11 +243,9 @@ class TestCommentsMixin:
         assert result["author"] == "John Doe"
 
     def test_add_comment_with_error(self, comments_mixin):
-        """Test add_comment with an error response."""
-        # Setup mock to raise exception
-        comments_mixin.jira.issue_add_comment.side_effect = Exception("API Error")
+        """Test add_comment with an error response (Cloud uses post)."""
+        comments_mixin.jira.post.side_effect = Exception("API Error")
 
-        # Verify it raises the wrapped exception
         with pytest.raises(Exception, match="Error adding comment"):
             comments_mixin.add_comment("TEST-123", "Test comment")
 

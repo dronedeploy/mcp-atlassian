@@ -74,9 +74,18 @@ class CommentsMixin(JiraClient):
             # Convert Markdown to Jira's markup format
             jira_formatted_comment = self._markdown_to_jira(comment)
 
-            result = self.jira.issue_add_comment(
-                issue_key, jira_formatted_comment, visibility
-            )
+            # JIRA Cloud v2 API expects body as string; v3 expects ADF. We produce ADF,
+            # so use v3 endpoint for Cloud to avoid "Comment body is not valid" errors.
+            if self.config.is_cloud:
+                endpoint = f"rest/api/3/issue/{issue_key}/comment"
+                data: dict[str, Any] = {"body": jira_formatted_comment}
+                if visibility:
+                    data["visibility"] = visibility
+                result = self.jira.post(endpoint, data=data)
+            else:
+                result = self.jira.issue_add_comment(
+                    issue_key, jira_formatted_comment, visibility
+                )
             if not isinstance(result, dict):
                 msg = f"Unexpected return value type from `jira.issue_add_comment`: {type(result)}"
                 logger.error(msg)
