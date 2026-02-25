@@ -250,9 +250,9 @@ class TestCommentsMixin:
             comments_mixin.add_comment("TEST-123", "Test comment")
 
     def test_edit_comment_basic(self, comments_mixin):
-        """Test edit_comment with basic data (Cloud → ADF)."""
-        # Setup mock response
-        comments_mixin.jira.issue_edit_comment.return_value = {
+        """Test edit_comment with basic data (Cloud → ADF via v3 API)."""
+        # Cloud uses v3 endpoint; mock put (not issue_edit_comment)
+        comments_mixin.jira.put.return_value = {
             "id": "10001",
             "body": "This is an updated comment",
             "updated": "2024-01-01T12:00:00.000+0000",
@@ -262,9 +262,10 @@ class TestCommentsMixin:
         # Call the method
         result = comments_mixin.edit_comment("TEST-123", "10001", "Updated comment")
 
-        # On Cloud, should produce ADF dict
-        call_args = comments_mixin.jira.issue_edit_comment.call_args
-        adf_arg = call_args[0][2]
+        # Cloud uses v3: put(endpoint, data={"body": adf_dict})
+        call_args = comments_mixin.jira.put.call_args
+        assert call_args[0][0] == "rest/api/3/issue/TEST-123/comment/10001"
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
@@ -274,9 +275,8 @@ class TestCommentsMixin:
         assert result["author"] == "John Doe"
 
     def test_edit_comment_with_markdown_conversion(self, comments_mixin):
-        """Test edit_comment with markdown conversion (Cloud → ADF)."""
-        # Setup mock response
-        comments_mixin.jira.issue_edit_comment.return_value = {
+        """Test edit_comment with markdown conversion (Cloud → ADF via v3)."""
+        comments_mixin.jira.put.return_value = {
             "id": "10001",
             "body": "Updated content",
             "updated": "2024-01-01T12:00:00.000+0000",
@@ -288,18 +288,16 @@ class TestCommentsMixin:
         # Call the method
         result = comments_mixin.edit_comment("TEST-123", "10001", markdown_comment)
 
-        # On Cloud, should produce ADF dict
-        call_args = comments_mixin.jira.issue_edit_comment.call_args
-        adf_arg = call_args[0][2]
+        call_args = comments_mixin.jira.put.call_args
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == "Updated content"
 
     def test_edit_comment_with_empty_comment(self, comments_mixin):
-        """Test edit_comment with an empty comment (Cloud → minimal ADF)."""
-        # Setup mock response
-        comments_mixin.jira.issue_edit_comment.return_value = {
+        """Test edit_comment with an empty comment (Cloud → minimal ADF via v3)."""
+        comments_mixin.jira.put.return_value = {
             "id": "10001",
             "body": "",
             "updated": "2024-01-01T12:00:00.000+0000",
@@ -309,18 +307,16 @@ class TestCommentsMixin:
         # Call the method with empty comment
         result = comments_mixin.edit_comment("TEST-123", "10001", "")
 
-        # On Cloud, empty string produces a minimal ADF dict
-        call_args = comments_mixin.jira.issue_edit_comment.call_args
-        adf_arg = call_args[0][2]
+        call_args = comments_mixin.jira.put.call_args
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == ""
 
     def test_edit_comment_with_restricted_visibility(self, comments_mixin):
-        """Test edit_comment with visibility set (Cloud → ADF)."""
-        # Setup mock response
-        comments_mixin.jira.issue_edit_comment.return_value = {
+        """Test edit_comment with visibility set (Cloud → ADF via v3)."""
+        comments_mixin.jira.put.return_value = {
             "id": "10001",
             "body": "This is an updated comment",
             "updated": "2024-01-01T12:00:00.000+0000",
@@ -335,13 +331,11 @@ class TestCommentsMixin:
             {"type": "group", "value": "restricted"},
         )
 
-        # Verify ADF conversion on Cloud
-        call_args = comments_mixin.jira.issue_edit_comment.call_args
-        adf_arg = call_args[0][2]
+        call_args = comments_mixin.jira.put.call_args
+        adf_arg = call_args[1]["data"]["body"]
         assert isinstance(adf_arg, dict)
         assert adf_arg["version"] == 1
-        visibility_arg = call_args[0][3]
-        assert visibility_arg == {"type": "group", "value": "restricted"}
+        assert call_args[1]["data"]["visibility"] == {"type": "group", "value": "restricted"}
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["id"] == "10001"
         assert result["body"] == "This is an updated comment"
@@ -350,8 +344,8 @@ class TestCommentsMixin:
 
     def test_edit_comment_with_error(self, comments_mixin):
         """Test edit_comment with an error response."""
-        # Setup mock to raise exception
-        comments_mixin.jira.issue_edit_comment.side_effect = Exception("API Error")
+        # Cloud uses put; mock to raise exception
+        comments_mixin.jira.put.side_effect = Exception("API Error")
 
         # Verify it raises the wrapped exception
         with pytest.raises(Exception, match="Error editing comment"):
