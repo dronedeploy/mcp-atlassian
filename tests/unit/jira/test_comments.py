@@ -155,23 +155,26 @@ class TestCommentsMixin:
 
     def test_add_comment_basic(self, comments_mixin):
         """Test add_comment with basic data (Cloud → ADF via v3 API)."""
-        # Cloud uses v3 endpoint; mock post (not issue_add_comment)
-        comments_mixin.jira.post.return_value = {
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "This is a comment",
             "created": "2024-01-01T10:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._post_api3 = Mock(return_value=mock_response)
 
         result = comments_mixin.add_comment("TEST-123", "Test comment")
 
-        # Cloud uses v3: post(endpoint, data={"body": adf_dict})
-        call_args = comments_mixin.jira.post.call_args
-        assert call_args[0][0] == "rest/api/3/issue/TEST-123/comment"
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
-        assert adf_arg["type"] == "doc"
+        # On Cloud, ADF goes through _post_api3 (not issue_add_comment)
+        comments_mixin._post_api3.assert_called_once()
+        call_args = comments_mixin._post_api3.call_args
+        assert call_args[0][0] == "issue/TEST-123/comment"
+        adf_body = call_args[0][1]["body"]
+        assert isinstance(adf_body, dict)
+        assert adf_body["version"] == 1
+        assert adf_body["type"] == "doc"
+        # preprocessor.markdown_to_jira should NOT be called on Cloud
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["id"] == "10001"
         assert result["body"] == "This is a comment"
@@ -180,62 +183,69 @@ class TestCommentsMixin:
 
     def test_add_comment_with_markdown_conversion(self, comments_mixin):
         """Test add_comment with markdown conversion (Cloud → ADF via v3)."""
-        comments_mixin.jira.post.return_value = {
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "Heading and content",
             "created": "2024-01-01T10:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._post_api3 = Mock(return_value=mock_response)
 
         markdown_comment = "# Heading 1\n\nThis is **bold** text."
         result = comments_mixin.add_comment("TEST-123", markdown_comment)
 
-        call_args = comments_mixin.jira.post.call_args
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
+        # On Cloud, should produce ADF via v3 API, not call preprocessor
+        call_args = comments_mixin._post_api3.call_args
+        adf_body = call_args[0][1]["body"]
+        assert isinstance(adf_body, dict)
+        assert adf_body["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == "Heading and content"
 
     def test_add_comment_with_empty_comment(self, comments_mixin):
-        """Test add_comment with an empty comment (Cloud → minimal ADF via v3)."""
-        comments_mixin.jira.post.return_value = {
+        """Test add_comment with an empty comment (Cloud → minimal ADF)."""
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "",
             "created": "2024-01-01T10:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._post_api3 = Mock(return_value=mock_response)
 
         result = comments_mixin.add_comment("TEST-123", "")
 
-        call_args = comments_mixin.jira.post.call_args
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
+        # On Cloud, empty string produces a minimal ADF dict via v3 API
+        call_args = comments_mixin._post_api3.call_args
+        adf_body = call_args[0][1]["body"]
+        assert isinstance(adf_body, dict)
+        assert adf_body["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == ""
 
     def test_add_comment_with_restricted_visibility(self, comments_mixin):
         """Test add_comment with visibility set (Cloud → ADF via v3)."""
-        comments_mixin.jira.post.return_value = {
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "This is a comment",
             "created": "2024-01-01T10:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._post_api3 = Mock(return_value=mock_response)
 
         result = comments_mixin.add_comment(
             "TEST-123", "Test comment", {"type": "group", "value": "restricted"}
         )
 
-        call_args = comments_mixin.jira.post.call_args
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
-        assert call_args[1]["data"]["visibility"] == {
-            "type": "group",
-            "value": "restricted",
-        }
+        # Verify ADF via v3 API with visibility
+        call_args = comments_mixin._post_api3.call_args
+        assert call_args[0][0] == "issue/TEST-123/comment"
+        payload = call_args[0][1]
+        assert isinstance(payload["body"], dict)
+        assert payload["body"]["version"] == 1
+        assert payload["visibility"] == {"type": "group", "value": "restricted"}
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["id"] == "10001"
         assert result["body"] == "This is a comment"
@@ -243,31 +253,34 @@ class TestCommentsMixin:
         assert result["author"] == "John Doe"
 
     def test_add_comment_with_error(self, comments_mixin):
-        """Test add_comment with an error response (Cloud uses post)."""
-        comments_mixin.jira.post.side_effect = Exception("API Error")
+        """Test add_comment with an error response."""
+        # Setup mock to raise exception (Cloud uses _post_api3)
+        comments_mixin._post_api3 = Mock(side_effect=Exception("API Error"))
 
         with pytest.raises(Exception, match="Error adding comment"):
             comments_mixin.add_comment("TEST-123", "Test comment")
 
     def test_edit_comment_basic(self, comments_mixin):
-        """Test edit_comment with basic data (Cloud → ADF via v3 API)."""
-        # Cloud uses v3 endpoint; mock put (not issue_edit_comment)
-        comments_mixin.jira.put.return_value = {
+        """Test edit_comment with basic data (Cloud → ADF via v3)."""
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "This is an updated comment",
             "updated": "2024-01-01T12:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._put_api3 = Mock(return_value=mock_response)
 
         # Call the method
         result = comments_mixin.edit_comment("TEST-123", "10001", "Updated comment")
 
-        # Cloud uses v3: put(endpoint, data={"body": adf_dict})
-        call_args = comments_mixin.jira.put.call_args
-        assert call_args[0][0] == "rest/api/3/issue/TEST-123/comment/10001"
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
+        # On Cloud, ADF goes through _put_api3
+        comments_mixin._put_api3.assert_called_once()
+        call_args = comments_mixin._put_api3.call_args
+        assert call_args[0][0] == "issue/TEST-123/comment/10001"
+        adf_body = call_args[0][1]["body"]
+        assert isinstance(adf_body, dict)
+        assert adf_body["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["id"] == "10001"
         assert result["body"] == "This is an updated comment"
@@ -276,52 +289,60 @@ class TestCommentsMixin:
 
     def test_edit_comment_with_markdown_conversion(self, comments_mixin):
         """Test edit_comment with markdown conversion (Cloud → ADF via v3)."""
-        comments_mixin.jira.put.return_value = {
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "Updated content",
             "updated": "2024-01-01T12:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._put_api3 = Mock(return_value=mock_response)
 
         markdown_comment = "# Updated Heading\n\nThis is **updated** text."
 
         # Call the method
         result = comments_mixin.edit_comment("TEST-123", "10001", markdown_comment)
 
-        call_args = comments_mixin.jira.put.call_args
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
+        # On Cloud, should produce ADF via v3 API
+        call_args = comments_mixin._put_api3.call_args
+        adf_body = call_args[0][1]["body"]
+        assert isinstance(adf_body, dict)
+        assert adf_body["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == "Updated content"
 
     def test_edit_comment_with_empty_comment(self, comments_mixin):
-        """Test edit_comment with an empty comment (Cloud → minimal ADF via v3)."""
-        comments_mixin.jira.put.return_value = {
+        """Test edit_comment with an empty comment (Cloud → minimal ADF)."""
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "",
             "updated": "2024-01-01T12:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._put_api3 = Mock(return_value=mock_response)
 
         # Call the method with empty comment
         result = comments_mixin.edit_comment("TEST-123", "10001", "")
 
-        call_args = comments_mixin.jira.put.call_args
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
+        # On Cloud, empty string produces a minimal ADF dict via v3 API
+        call_args = comments_mixin._put_api3.call_args
+        adf_body = call_args[0][1]["body"]
+        assert isinstance(adf_body, dict)
+        assert adf_body["version"] == 1
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["body"] == ""
 
     def test_edit_comment_with_restricted_visibility(self, comments_mixin):
         """Test edit_comment with visibility set (Cloud → ADF via v3)."""
-        comments_mixin.jira.put.return_value = {
+        # Setup mock response for v3 API path
+        mock_response = {
             "id": "10001",
             "body": "This is an updated comment",
             "updated": "2024-01-01T12:00:00.000+0000",
             "author": {"displayName": "John Doe"},
         }
+        comments_mixin._put_api3 = Mock(return_value=mock_response)
 
         # Call the method
         result = comments_mixin.edit_comment(
@@ -331,11 +352,13 @@ class TestCommentsMixin:
             {"type": "group", "value": "restricted"},
         )
 
-        call_args = comments_mixin.jira.put.call_args
-        adf_arg = call_args[1]["data"]["body"]
-        assert isinstance(adf_arg, dict)
-        assert adf_arg["version"] == 1
-        assert call_args[1]["data"]["visibility"] == {"type": "group", "value": "restricted"}
+        # Verify ADF via v3 API with visibility
+        call_args = comments_mixin._put_api3.call_args
+        assert call_args[0][0] == "issue/TEST-123/comment/10001"
+        payload = call_args[0][1]
+        assert isinstance(payload["body"], dict)
+        assert payload["body"]["version"] == 1
+        assert payload["visibility"] == {"type": "group", "value": "restricted"}
         comments_mixin.preprocessor.markdown_to_jira.assert_not_called()
         assert result["id"] == "10001"
         assert result["body"] == "This is an updated comment"
@@ -344,8 +367,8 @@ class TestCommentsMixin:
 
     def test_edit_comment_with_error(self, comments_mixin):
         """Test edit_comment with an error response."""
-        # Cloud uses put; mock to raise exception
-        comments_mixin.jira.put.side_effect = Exception("API Error")
+        # Setup mock to raise exception (Cloud uses _put_api3)
+        comments_mixin._put_api3 = Mock(side_effect=Exception("API Error"))
 
         # Verify it raises the wrapped exception
         with pytest.raises(Exception, match="Error editing comment"):
@@ -415,3 +438,110 @@ class TestCommentsMixin:
         comment_arg = call_args[0][2]
         assert isinstance(comment_arg, str)
         assert result["body"] == "h1. Updated"
+
+    # --- ServiceDesk API (internal/public comments) tests ---
+
+    SERVICEDESK_COMMENT_RESPONSE = {
+        "id": 10001,
+        "body": "Test comment",
+        "public": True,
+        "created": {
+            "iso8601": "2024-01-01T10:00:00.000+0000",
+            "jira": "2024-01-01T10:00:00.000+0000",
+            "friendly": "Today 10:00 AM",
+            "epochMillis": 1704099600000,
+        },
+        "author": {
+            "accountId": "test-id",
+            "displayName": "Test User",
+        },
+    }
+
+    def test_add_comment_servicedesk_public(self, comments_mixin):
+        """public=True routes through ServiceDesk API."""
+        response = {**self.SERVICEDESK_COMMENT_RESPONSE, "public": True}
+        comments_mixin.jira.post.return_value = response
+
+        result = comments_mixin.add_comment("TEST-123", "Test comment", public=True)
+
+        comments_mixin.jira.post.assert_called_once()
+        call_args = comments_mixin.jira.post.call_args
+        assert "rest/servicedeskapi/request/TEST-123/comment" in str(call_args)
+        assert call_args[1]["data"] == {
+            "body": "Test comment",
+            "public": True,
+        }
+        # Verify experimental header is included
+        headers = call_args[1]["headers"]
+        assert headers["X-ExperimentalApi"] == "opt-in"
+        assert result["public"] is True
+        assert result["id"] == "10001"
+        assert result["author"] == "Test User"
+
+    def test_add_comment_servicedesk_internal(self, comments_mixin):
+        """public=False routes through ServiceDesk API as internal."""
+        response = {**self.SERVICEDESK_COMMENT_RESPONSE, "public": False}
+        comments_mixin.jira.post.return_value = response
+
+        result = comments_mixin.add_comment("TEST-123", "Internal note", public=False)
+
+        call_args = comments_mixin.jira.post.call_args
+        assert call_args[1]["data"] == {
+            "body": "Internal note",
+            "public": False,
+        }
+        assert result["public"] is False
+
+    def test_add_comment_servicedesk_cloud(self, comments_mixin):
+        """public=True on Cloud uses ServiceDesk API, not ADF/v3."""
+        response = {**self.SERVICEDESK_COMMENT_RESPONSE}
+        comments_mixin.jira.post.return_value = response
+        comments_mixin._post_api3 = Mock()
+
+        comments_mixin.add_comment("TEST-123", "Test", public=True)
+
+        # ServiceDesk path should use jira.post, NOT _post_api3
+        comments_mixin.jira.post.assert_called_once()
+        comments_mixin._post_api3.assert_not_called()
+
+    def test_add_comment_servicedesk_403(self, comments_mixin):
+        """public=True on non-JSM project gives clear 403 error."""
+        comments_mixin.jira.post.side_effect = Exception("403 Client Error: Forbidden")
+
+        with pytest.raises(Exception, match="not a JSM service desk issue"):
+            comments_mixin.add_comment("TEST-123", "Test", public=True)
+
+    def test_add_comment_servicedesk_404(self, comments_mixin):
+        """public=True on non-existent issue gives clear 404 error."""
+        comments_mixin.jira.post.side_effect = Exception("404 Client Error: Not Found")
+
+        with pytest.raises(Exception, match="not a JSM service desk issue"):
+            comments_mixin.add_comment("TEST-123", "Test", public=True)
+
+    def test_add_comment_public_with_visibility_raises(self, comments_mixin):
+        """public + visibility together raises ValueError."""
+        with pytest.raises(ValueError, match="Cannot use both"):
+            comments_mixin.add_comment(
+                "TEST-123",
+                "Test",
+                visibility={"type": "group", "value": "jira-users"},
+                public=True,
+            )
+
+    def test_add_comment_public_none_uses_jira_api(self, comments_mixin):
+        """public=None (default) uses normal Jira API path."""
+        mock_response = {
+            "id": "10001",
+            "body": "Normal comment",
+            "created": "2024-01-01T10:00:00.000+0000",
+            "author": {"displayName": "John Doe"},
+        }
+        comments_mixin._post_api3 = Mock(return_value=mock_response)
+
+        result = comments_mixin.add_comment("TEST-123", "Normal comment")
+
+        # Should go through normal Jira path (ADF on Cloud)
+        comments_mixin._post_api3.assert_called_once()
+        # ServiceDesk post should NOT be called
+        comments_mixin.jira.post.assert_not_called()
+        assert result["id"] == "10001"

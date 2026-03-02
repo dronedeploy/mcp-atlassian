@@ -4,7 +4,63 @@ import os
 import socket
 from unittest.mock import patch
 
-from mcp_atlassian.utils.urls import is_atlassian_cloud_url, validate_url_for_ssrf
+import pytest
+
+from mcp_atlassian.utils.urls import (
+    is_atlassian_cloud_url,
+    resolve_relative_url,
+    validate_url_for_ssrf,
+)
+
+
+class TestResolveRelativeUrl:
+    """Tests for resolve_relative_url."""
+
+    @pytest.mark.parametrize(
+        ("url", "base_url", "expected"),
+        [
+            # Relative URL gets base prepended
+            (
+                "/download/attachments/123/file.pdf",
+                "https://confluence.example.com",
+                "https://confluence.example.com/download/attachments/123/file.pdf",
+            ),
+            # Absolute URL passes through unchanged
+            (
+                "https://other.example.com/file.pdf",
+                "https://confluence.example.com",
+                "https://other.example.com/file.pdf",
+            ),
+            # Base URL with trailing slash — no double slash
+            (
+                "/download/file.pdf",
+                "https://confluence.example.com/",
+                "https://confluence.example.com/download/file.pdf",
+            ),
+            # Base URL with multiple trailing slashes stripped
+            (
+                "/path/to/file",
+                "https://confluence.example.com//",
+                "https://confluence.example.com/path/to/file",
+            ),
+            # Non-slash relative URL (e.g. bare filename) passes through
+            (
+                "file.pdf",
+                "https://confluence.example.com",
+                "file.pdf",
+            ),
+        ],
+        ids=[
+            "relative-url-prepended",
+            "absolute-url-unchanged",
+            "trailing-slash-stripped",
+            "multiple-trailing-slashes-stripped",
+            "non-slash-relative-unchanged",
+        ],
+    )
+    def test_resolve_relative_url(self, url: str, base_url: str, expected: str) -> None:
+        """Parametrized test for resolve_relative_url."""
+        assert resolve_relative_url(url, base_url) == expected
 
 
 def test_is_atlassian_cloud_url_empty():
@@ -221,6 +277,52 @@ class TestValidateUrlForSsrf:
         result = validate_url_for_ssrf("http://metadata.google.internal")
         assert result is not None
         assert "Blocked hostname" in result
+
+    def test_allowlist_subdomain_private_ip(self) -> None:
+        """Allowlisted subdomain resolving to private IP is accepted."""
+        with patch.dict(
+            os.environ,
+            {"MCP_ALLOWED_URL_DOMAINS": "corp.example.com"},
+        ):
+            assert validate_url_for_ssrf("https://jira.corp.example.com") is None
+
+    def test_allowlist_exact_private_ip(self) -> None:
+        """Allowlisted exact domain resolving to private IP is accepted."""
+        with patch.dict(
+            os.environ,
+            {"MCP_ALLOWED_URL_DOMAINS": "internal.company.com"},
+        ):
+            assert validate_url_for_ssrf("https://internal.company.com") is None
+
+    def test_allowlist_rejects_non_matching_private_ip(self) -> None:
+        """Non-allowlisted domain resolving to private IP is still rejected."""
+        with patch.dict(
+            os.environ,
+            {"MCP_ALLOWED_URL_DOMAINS": "corp.example.com"},
+        ):
+            result = validate_url_for_ssrf("https://evil.com")
+            assert result is not None
+            assert "not in allowed" in result.lower()
+
+    def test_no_allowlist_private_ip_rejected(self) -> None:
+        """Without allowlist, hostname resolving to private IP is rejected."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MCP_ALLOWED_URL_DOMAINS", None)
+            with patch("mcp_atlassian.utils.urls.socket.getaddrinfo") as mock_dns:
+                mock_dns.return_value = [(2, 1, 6, "", ("10.0.0.1", 0))]
+                result = validate_url_for_ssrf("https://some.host")
+                assert result is not None
+                assert "non-global" in result.lower()
+
+    def test_allowlist_bypasses_dns_failure(self) -> None:
+        """Allowlisted domain is accepted even when DNS resolution fails."""
+        with patch.dict(
+            os.environ,
+            {"MCP_ALLOWED_URL_DOMAINS": "corp.example.com"},
+        ):
+            with patch("mcp_atlassian.utils.urls.socket.getaddrinfo") as mock_dns:
+                mock_dns.side_effect = socket.gaierror("Name resolution failed")
+                assert validate_url_for_ssrf("https://jira.corp.example.com") is None
 
     def test_ipv4_mapped_ipv6(self) -> None:
         """IPv4-mapped IPv6 loopback is rejected."""

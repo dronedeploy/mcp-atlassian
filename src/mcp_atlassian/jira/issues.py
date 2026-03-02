@@ -695,8 +695,12 @@ class IssuesMixin(
             # Process **kwargs using the dynamic field map
             self._process_additional_fields(fields, kwargs_copy)
 
-            # Create the issue
-            response = self.jira.create_issue(fields=fields)
+            # Create the issue (use v3 API on Cloud for ADF description)
+            has_adf = isinstance(fields.get("description"), dict)
+            if has_adf and self.config.is_cloud:
+                response = self._post_api3("issue", {"fields": fields})
+            else:
+                response = self.jira.create_issue(fields=fields)
             if not isinstance(response, dict):
                 msg = f"Unexpected return value type from `jira.create_issue`: {type(response)}"
                 logger.error(msg)
@@ -1091,10 +1095,7 @@ class IssuesMixin(
 
                 elif key == "attachments":
                     # Handle attachments separately - they're not part of fields update
-                    if value and isinstance(value, list | tuple):
-                        # We'll process attachments after updating fields
-                        pass
-                    else:
+                    if not value or not isinstance(value, list | tuple):
                         logger.warning(f"Invalid attachments value: {value}")
 
                 elif key == "assignee":
@@ -1125,11 +1126,18 @@ class IssuesMixin(
                     field_kwargs = {key: value}
                     self._process_additional_fields(update_fields, field_kwargs)
 
-            # Update the issue fields
+            # Update the issue fields (use v3 API on Cloud for ADF description)
             if update_fields:
-                self.jira.update_issue(
-                    issue_key=issue_key, update={"fields": update_fields}
-                )
+                has_adf = isinstance(update_fields.get("description"), dict)
+                if has_adf and self.config.is_cloud:
+                    self._put_api3(
+                        f"issue/{issue_key}",
+                        {"fields": update_fields},
+                    )
+                else:
+                    self.jira.update_issue(
+                        issue_key=issue_key, update={"fields": update_fields}
+                    )
 
             # Handle attachments if provided
             if "attachments" in kwargs and kwargs["attachments"]:

@@ -7,6 +7,24 @@ import socket
 from urllib.parse import urlparse
 
 
+def resolve_relative_url(url: str, base_url: str) -> str:
+    """Resolve a relative URL against a base URL.
+
+    Only modifies URLs that start with '/'. Absolute URLs are returned as-is.
+
+    Args:
+        url: The URL to resolve (may be relative or absolute).
+        base_url: The base URL to prepend for relative URLs.
+
+    Returns:
+        The resolved absolute URL.
+    """
+    if url.startswith("/"):
+        # Strip trailing slash from base_url to avoid double slashes
+        return base_url.rstrip("/") + url
+    return url
+
+
 def is_atlassian_cloud_url(url: str) -> bool:
     """Determine if a URL belongs to Atlassian Cloud or Server/Data Center.
 
@@ -34,14 +52,16 @@ def is_atlassian_cloud_url(url: str) -> bool:
         return False
 
     # The standard check for Atlassian cloud domains
+    # Use endswith() to prevent URL validation bypass via substring matching
     # Includes US Government cloud domains (FedRAMP Moderate/High)
     return (
-        ".atlassian.net" in hostname
-        or ".jira.com" in hostname
-        or ".jira-dev.com" in hostname
-        or "api.atlassian.com" in hostname
-        or ".atlassian-us-gov-mod.net" in hostname  # US Gov Moderate (FedRAMP)
-        or ".atlassian-us-gov.net" in hostname  # US Gov (FedRAMP)
+        hostname.endswith(".atlassian.net")
+        or hostname.endswith(".jira.com")
+        or hostname.endswith(".jira-dev.com")
+        or hostname == "api.atlassian.com"
+        or hostname.endswith(".atlassian.com")
+        or hostname.endswith(".atlassian-us-gov-mod.net")  # US Gov Moderate (FedRAMP)
+        or hostname.endswith(".atlassian-us-gov.net")  # US Gov (FedRAMP)
     )
 
 
@@ -88,6 +108,7 @@ def validate_url_for_ssrf(url: str) -> str | None:
     if allowlist is not None:
         if not _hostname_matches_allowlist(hostname, allowlist):
             return f"Hostname {hostname} not in allowed domains"
+        return None  # explicitly allowlisted — skip DNS check
 
     # DNS resolution check - resolve hostname and check all IPs
     dns_error = _check_dns_resolution(hostname)

@@ -3,9 +3,11 @@
 import base64
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Literal, Optional
+from urllib.parse import urlparse
 
 from cachetools import TTLCache
 from fastmcp import FastMCP
@@ -23,17 +25,41 @@ from mcp_atlassian.confluence import ConfluenceFetcher
 from mcp_atlassian.confluence.config import ConfluenceConfig
 from mcp_atlassian.jira import JiraFetcher
 from mcp_atlassian.jira.config import JiraConfig
+from mcp_atlassian.utils.env import is_env_truthy
 from mcp_atlassian.utils.environment import get_available_services
 from mcp_atlassian.utils.io import is_read_only_mode
 from mcp_atlassian.utils.logging import mask_sensitive
+from mcp_atlassian.utils.oauth import (
+    CLOUD_AUTHORIZE_URL,
+    CLOUD_TOKEN_URL,
+    DC_AUTHORIZE_PATH,
+    DC_TOKEN_PATH,
+)
+from mcp_atlassian.utils.token_verifier import AtlassianOpaqueTokenVerifier
 from mcp_atlassian.utils.tools import get_enabled_tools, should_include_tool
-from mcp_atlassian.utils.urls import validate_url_for_ssrf
+from mcp_atlassian.utils.toolsets import (
+    get_enabled_toolsets,
+    should_include_tool_by_toolset,
+)
+from mcp_atlassian.utils.urls import is_atlassian_cloud_url, validate_url_for_ssrf
 
+from .client_storage import build_oauth_client_storage_from_env
 from .confluence import confluence_mcp
 from .context import MainAppContext
 from .jira import jira_mcp
+from .oauth_proxy import HardenedOAuthProxy, parse_env_list
 
 logger = logging.getLogger("mcp-atlassian.server.main")
+
+DEFAULT_HOST = "0.0.0.0"  # noqa: S104
+DEFAULT_ALLOWED_REDIRECT_URIS = [
+    "http://localhost:*",
+    "http://127.0.0.1:*",
+    "https://chatgpt.com/connector_platform_oauth_redirect",
+    "https://chat.openai.com/connector_platform_oauth_redirect",
+]
+DEFAULT_ALLOWED_GRANT_TYPES = ["authorization_code", "refresh_token"]
+OAUTH_PROXY_ENABLE_ENV = "ATLASSIAN_OAUTH_PROXY_ENABLE"
 
 
 def _sanitize_schema_for_compatibility(tool: MCPTool) -> MCPTool:
@@ -98,6 +124,7 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict[str,
     services = get_available_services()
     read_only = is_read_only_mode()
     enabled_tools = get_enabled_tools()
+    enabled_toolsets = get_enabled_toolsets()
 
     loaded_jira_config: JiraConfig | None = None
     loaded_confluence_config: ConfluenceConfig | None = None
@@ -137,9 +164,11 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict[str,
         full_confluence_config=loaded_confluence_config,
         read_only=read_only,
         enabled_tools=enabled_tools,
+        enabled_toolsets=enabled_toolsets,
     )
     logger.info(f"Read-only mode: {'ENABLED' if read_only else 'DISABLED'}")
     logger.info(f"Enabled tools filter: {enabled_tools or 'All tools enabled'}")
+    logger.info(f"Enabled toolsets filter: {sorted(enabled_toolsets)}")
 
     try:
         yield {"app_lifespan_context": app_context}
@@ -205,6 +234,11 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             if app_lifespan_state
             else None
         )
+        enabled_toolsets_filter: set[str] | None = (
+            getattr(app_lifespan_state, "enabled_toolsets", None)
+            if app_lifespan_state
+            else None
+        )
 
         header_based_services = {"jira": False, "confluence": False}
         request = getattr(req_context, "request", None)
@@ -228,6 +262,12 @@ class AtlassianMCP(FastMCP[MainAppContext]):
         filtered_tools: list[MCPTool] = []
         for registered_name, tool_obj in all_tools.items():
             tool_tags = tool_obj.tags
+
+            if not should_include_tool_by_toolset(tool_tags, enabled_toolsets_filter):
+                logger.debug(
+                    f"Excluding tool '{registered_name}' (toolset not enabled)"
+                )
+                continue
 
             if not should_include_tool(registered_name, enabled_tools_filter):
                 logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
@@ -368,8 +408,16 @@ class UserTokenMiddleware:
             f"{scope_copy.get('path', 'UNKNOWN')}"
         )
 
+        # Skip auth header processing if IGNORE_HEADER_AUTH is set
+        # (useful for GCP Cloud Run / AWS ALB that inject Authorization headers)
+        ignore_header_auth = is_env_truthy("IGNORE_HEADER_AUTH")
+
         # Only process authentication for our MCP endpoint
-        if self.mcp_server_ref and self._should_process_auth(scope_copy):
+        if (
+            not ignore_header_auth
+            and self.mcp_server_ref
+            and self._should_process_auth(scope_copy)
+        ):
             self._process_authentication_headers(scope_copy)
 
         # Create wrapped send function to handle client disconnections gracefully
@@ -633,7 +681,140 @@ class UserTokenMiddleware:
             )
 
 
-main_mcp = AtlassianMCP(name="Atlassian MCP", lifespan=main_lifespan)
+def _get_allowed_redirect_uris() -> list[str] | None:
+    raw = os.getenv("ATLASSIAN_OAUTH_ALLOWED_CLIENT_REDIRECT_URIS")
+    parsed = parse_env_list(raw)
+    if parsed is None:
+        return DEFAULT_ALLOWED_REDIRECT_URIS
+    return parsed
+
+
+def _get_allowed_grant_types() -> list[str]:
+    raw = os.getenv("ATLASSIAN_OAUTH_ALLOWED_GRANT_TYPES")
+    parsed = parse_env_list(raw)
+    if parsed is None:
+        return DEFAULT_ALLOWED_GRANT_TYPES
+    if not parsed:
+        logger.warning(
+            "ATLASSIAN_OAUTH_ALLOWED_GRANT_TYPES is empty; defaulting to %s",
+            DEFAULT_ALLOWED_GRANT_TYPES,
+        )
+        return DEFAULT_ALLOWED_GRANT_TYPES
+    return parsed
+
+
+def _resolve_upstream_oauth_endpoints(instance_url: str) -> tuple[str, str]:
+    parsed_host = (urlparse(instance_url).hostname or "").lower()
+    is_cloud = (
+        is_atlassian_cloud_url(instance_url) or parsed_host == "auth.atlassian.com"
+    )
+
+    if is_cloud:
+        return CLOUD_AUTHORIZE_URL, CLOUD_TOKEN_URL
+
+    base_url = instance_url.rstrip("/")
+    return f"{base_url}{DC_AUTHORIZE_PATH}", f"{base_url}{DC_TOKEN_PATH}"
+
+
+def _is_cloud_instance(instance_url: str) -> bool:
+    parsed_host = (urlparse(instance_url).hostname or "").lower()
+    return is_atlassian_cloud_url(instance_url) or parsed_host == "auth.atlassian.com"
+
+
+def _build_auth_provider() -> HardenedOAuthProxy | None:
+    """Create an opt-in OAuth proxy auth provider with DCR + discovery support."""
+    if not is_env_truthy(OAUTH_PROXY_ENABLE_ENV, "false"):
+        logger.info(
+            "OAuth proxy auth provider disabled; set %s=true to enable DCR/proxy routes.",
+            OAUTH_PROXY_ENABLE_ENV,
+        )
+        return None
+
+    instance_url = (
+        os.getenv("ATLASSIAN_OAUTH_INSTANCE_URL")
+        or os.getenv("JIRA_URL")
+        or os.getenv("CONFLUENCE_URL")
+    )
+    client_id = (
+        os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
+        or os.getenv("JIRA_OAUTH_CLIENT_ID")
+        or os.getenv("CONFLUENCE_OAUTH_CLIENT_ID")
+    )
+    client_secret = (
+        os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
+        or os.getenv("JIRA_OAUTH_CLIENT_SECRET")
+        or os.getenv("CONFLUENCE_OAUTH_CLIENT_SECRET")
+    )
+    redirect_uri = os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI")
+    scope_env = os.getenv("ATLASSIAN_OAUTH_SCOPE", "")
+
+    if not all([instance_url, client_id, client_secret, redirect_uri]):
+        logger.warning(
+            "OAuth proxy requested but required vars are missing. "
+            "Need instance URL + client credentials + redirect URI."
+        )
+        return None
+
+    scopes = [s for part in scope_env.replace(",", " ").split() if (s := part)]
+    is_cloud = _is_cloud_instance(instance_url)
+    upstream_authorize, upstream_token = _resolve_upstream_oauth_endpoints(instance_url)
+
+    parsed_redirect = urlparse(redirect_uri)
+    raw_redirect_path = parsed_redirect.path or "/callback"
+
+    base_url = os.getenv("PUBLIC_BASE_URL")
+    if not base_url and parsed_redirect.scheme and parsed_redirect.netloc:
+        redirect_dir = raw_redirect_path.rsplit("/", 1)[0]
+        base_url = f"{parsed_redirect.scheme}://{parsed_redirect.netloc}{redirect_dir}"
+
+    if not base_url:
+        host = os.getenv("HOST", DEFAULT_HOST)
+        port = os.getenv("PORT", "3000")
+        host_for_url = "localhost" if host in (DEFAULT_HOST, "127.0.0.1") else host
+        base_url = f"http://{host_for_url}:{port}"
+
+    base_path = urlparse(base_url).path.rstrip("/")
+    redirect_path = raw_redirect_path
+    if base_path:
+        if redirect_path == base_path:
+            redirect_path = "/"
+        elif redirect_path.startswith(base_path + "/"):
+            redirect_path = redirect_path[len(base_path) :]
+
+    if not redirect_path.startswith("/"):
+        redirect_path = f"/{redirect_path}"
+
+    allowed_client_redirect_uris = _get_allowed_redirect_uris()
+    allowed_grant_types = _get_allowed_grant_types()
+    require_consent = is_env_truthy("ATLASSIAN_OAUTH_REQUIRE_CONSENT", "true")
+    verifier = AtlassianOpaqueTokenVerifier(required_scopes=scopes)
+
+    return HardenedOAuthProxy(
+        upstream_authorization_endpoint=upstream_authorize,
+        upstream_token_endpoint=upstream_token,
+        upstream_client_id=client_id,
+        upstream_client_secret=client_secret,
+        token_verifier=verifier,
+        base_url=base_url,
+        redirect_path=redirect_path,
+        allowed_client_redirect_uris=allowed_client_redirect_uris,
+        valid_scopes=scopes or None,
+        allowed_grant_types=allowed_grant_types,
+        forced_scopes=scopes or None,
+        token_endpoint_auth_method="client_secret_post",  # noqa: S106
+        extra_authorize_params=(
+            {"audience": "api.atlassian.com", "prompt": "consent"} if is_cloud else None
+        ),
+        client_storage=build_oauth_client_storage_from_env(),
+        require_authorization_consent=require_consent,
+    )
+
+
+main_mcp = AtlassianMCP(
+    name="Atlassian MCP",
+    lifespan=main_lifespan,
+    auth=_build_auth_provider(),
+)
 main_mcp.mount(jira_mcp, "jira")
 main_mcp.mount(confluence_mcp, "confluence")
 
