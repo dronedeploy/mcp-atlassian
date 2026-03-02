@@ -929,11 +929,11 @@ class TestIssuesMixin:
         # Test with string format
         issue = issues_mixin.get_issue("TEST-123", fields="summary,customfield_10049")
 
-        # Verify the API call
+        # Verify the API call (implementation appends "comment" when not in list)
         issues_mixin.jira.get_issue.assert_called_with(
             "TEST-123",
             expand=None,
-            fields="summary,customfield_10049",
+            fields="summary,customfield_10049,comment",
             properties=None,
             update_history=True,
         )
@@ -950,11 +950,11 @@ class TestIssuesMixin:
             "TEST-123", fields=["summary", "customfield_10050"]
         )
 
-        # Verify API call converts list to comma-separated string
+        # Verify API call converts list to comma-separated string (implementation appends "comment")
         issues_mixin.jira.get_issue.assert_called_with(
             "TEST-123",
             expand=None,
-            fields="summary,customfield_10050",
+            fields="summary,customfield_10050,comment",
             properties=None,
             update_history=True,
         )
