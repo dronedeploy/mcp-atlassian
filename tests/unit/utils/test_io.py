@@ -1,12 +1,18 @@
 """Tests for the I/O utilities module."""
 
+import io
 import os
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from mcp_atlassian.utils.io import is_read_only_mode, validate_safe_path
+from mcp_atlassian.utils.io import (
+    _EmptyLineFilteringBuffer,
+    is_read_only_mode,
+    validate_safe_path,
+    wrap_stdin_skip_empty_lines,
+)
 
 
 def test_is_read_only_mode_default():
@@ -125,3 +131,39 @@ class TestValidateSafePath:
         monkeypatch.chdir(tmp_path)
         result = validate_safe_path("child.txt")
         assert result == (tmp_path / "child.txt").resolve()
+
+
+# --- stdin empty-line filter (MCP stdio guard) ---
+
+
+def test_empty_line_filtering_buffer_skips_blank_lines():
+    """EmptyLineFilteringBuffer readline() skips blank/whitespace-only lines."""
+    raw = io.BytesIO(b"\n\n{\"jsonrpc\":\"2.0\"}\n  \n\n")
+    wrapper = _EmptyLineFilteringBuffer(raw)
+    line = wrapper.readline()
+    assert line == b"{\"jsonrpc\":\"2.0\"}\n"
+    assert wrapper.readline() == b""
+    wrapper.close()
+
+
+def test_empty_line_filtering_buffer_eof():
+    """EmptyLineFilteringBuffer readline() returns empty bytes at EOF."""
+    raw = io.BytesIO(b"")
+    wrapper = _EmptyLineFilteringBuffer(raw)
+    assert wrapper.readline() == b""
+    wrapper.close()
+
+
+def test_wrap_stdin_skip_empty_lines_replaces_and_restores():
+    """wrap_stdin_skip_empty_lines replaces sys.stdin and returns original for restore."""
+    import sys
+
+    original = sys.stdin
+    try:
+        restored = wrap_stdin_skip_empty_lines()
+        assert restored is original
+        assert sys.stdin is not original
+        assert hasattr(sys.stdin, "buffer")
+    finally:
+        sys.stdin = original
+    assert sys.stdin is original

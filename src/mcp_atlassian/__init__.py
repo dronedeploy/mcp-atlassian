@@ -63,34 +63,39 @@ async def _watch_parent_exit(stop_event: threading.Event) -> None:
 
 async def _run_stdio_with_stdin_guard(run_kwargs: dict[str, object]) -> None:
     from mcp_atlassian.servers import main_mcp
+    from mcp_atlassian.utils.io import wrap_stdin_skip_empty_lines
 
-    parent_watch_stop = threading.Event()
-    server_task = asyncio.create_task(main_mcp.run_async(**run_kwargs))
-    parent_task = asyncio.create_task(_watch_parent_exit(parent_watch_stop))
+    original_stdin = wrap_stdin_skip_empty_lines()
+    try:
+        parent_watch_stop = threading.Event()
+        server_task = asyncio.create_task(main_mcp.run_async(**run_kwargs))
+        parent_task = asyncio.create_task(_watch_parent_exit(parent_watch_stop))
 
-    done, pending = await asyncio.wait(
-        {server_task, parent_task},
-        return_when=asyncio.FIRST_COMPLETED,
-    )
-    parent_watch_stop.set()
+        done, pending = await asyncio.wait(
+            {server_task, parent_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        parent_watch_stop.set()
 
-    if parent_task in done and not server_task.done():
-        logger.info("Parent process exited. Shutting down STDIO server.")
-        server_task.cancel()
+        if parent_task in done and not server_task.done():
+            logger.info("Parent process exited. Shutting down STDIO server.")
+            server_task.cancel()
 
-    for task in pending:
-        task.cancel()
+        for task in pending:
+            task.cancel()
 
-    await asyncio.gather(*pending, return_exceptions=True)
+        await asyncio.gather(*pending, return_exceptions=True)
 
-    if server_task.done():
-        server_result = await asyncio.gather(server_task, return_exceptions=True)
-        if (
-            server_result
-            and isinstance(server_result[0], Exception)
-            and not isinstance(server_result[0], asyncio.CancelledError)
-        ):
-            raise server_result[0]
+        if server_task.done():
+            server_result = await asyncio.gather(server_task, return_exceptions=True)
+            if (
+                server_result
+                and isinstance(server_result[0], Exception)
+                and not isinstance(server_result[0], asyncio.CancelledError)
+            ):
+                raise server_result[0]
+    finally:
+        sys.stdin = original_stdin
 
 
 @click.version_option(__version__, prog_name="mcp-atlassian")
