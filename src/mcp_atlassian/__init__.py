@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import threading
+from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 
 from dotenv import dotenv_values, load_dotenv
@@ -61,6 +62,10 @@ logging_stream = sys.stdout if is_env_truthy("MCP_LOGGING_STDOUT") else sys.stde
 # Set up logging using the utility function
 logger = setup_logging(logging_level, logging_stream)
 
+# Preserve current "all toolsets" behavior when unset and silence deprecation warning
+# (in v0.22.0 unset would default to 6 core toolsets; set TOOLSETS=default to opt in early)
+os.environ.setdefault("TOOLSETS", "all")
+
 
 async def _watch_parent_exit(stop_event: threading.Event) -> None:
     parent_pid = os.getppid()
@@ -83,10 +88,79 @@ async def _watch_parent_exit(stop_event: threading.Event) -> None:
 
 
 async def _run_stdio_with_stdin_guard(run_kwargs: dict[str, object]) -> None:
-    from mcp_atlassian.servers import main_mcp
+    """Run MCP server with stdin guard: skip empty lines to avoid JSON parse errors."""
+    import mcp.server.stdio as _stdio_module
     from mcp_atlassian.utils.io import wrap_stdin_skip_empty_lines
 
+    # Layer 2: patch MCP stdio reader BEFORE importing main_mcp so FastMCP sees the patch
+    # (FastMCP does "from mcp.server.stdio import stdio_server" at import time)
+    _original_stdio_server = _stdio_module.stdio_server
+
+    @asynccontextmanager
+    async def _patched_stdio_server(stdin=None, stdout=None):
+        from io import TextIOWrapper
+
+        import anyio
+        import anyio.lowlevel
+
+        import mcp.types as types
+        from mcp.shared.message import SessionMessage
+
+        if not stdin:
+            stdin = anyio.wrap_file(
+                TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
+            )
+        if not stdout:
+            stdout = anyio.wrap_file(
+                TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+            )
+
+        read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
+        write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
+
+        async def stdin_reader():
+            try:
+                async with read_stream_writer:
+                    async for line in stdin:
+                        if not line or not line.strip():
+                            continue
+                        try:
+                            message = types.JSONRPCMessage.model_validate_json(
+                                line
+                            )
+                        except Exception as exc:
+                            await read_stream_writer.send(exc)
+                            continue
+                        session_message = SessionMessage(message)
+                        await read_stream_writer.send(session_message)
+            except anyio.ClosedResourceError:
+                await anyio.lowlevel.checkpoint()
+
+        async def stdout_writer():
+            try:
+                async with write_stream_reader:
+                    async for session_message in write_stream_reader:
+                        json = session_message.message.model_dump_json(
+                            by_alias=True, exclude_none=True
+                        )
+                        await stdout.write(json + "\n")
+                        await stdout.flush()
+            except anyio.ClosedResourceError:
+                await anyio.lowlevel.checkpoint()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(stdin_reader)
+            tg.start_soon(stdout_writer)
+            yield read_stream, write_stream
+
+    _stdio_module.stdio_server = _patched_stdio_server
+
+    # Layer 1: wrap sys.stdin so readline() skips blank lines
     original_stdin = wrap_stdin_skip_empty_lines()
+
+    # Import after patch so fastmcp.server gets patched stdio_server
+    from mcp_atlassian.servers import main_mcp
+
     try:
         parent_watch_stop = threading.Event()
         server_task = asyncio.create_task(main_mcp.run_async(**run_kwargs))
@@ -116,6 +190,7 @@ async def _run_stdio_with_stdin_guard(run_kwargs: dict[str, object]) -> None:
             ):
                 raise server_result[0]
     finally:
+        _stdio_module.stdio_server = _original_stdio_server
         sys.stdin = original_stdin
 
 
