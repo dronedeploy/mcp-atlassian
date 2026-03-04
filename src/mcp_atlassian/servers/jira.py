@@ -72,6 +72,48 @@ def _parse_visibility(
         ) from e
 
 
+def _sanitize_json_control_chars(s: str) -> str:
+    """Escape control characters inside double-quoted JSON strings.
+
+    JSON does not allow unescaped control characters (e.g. newline, tab) inside
+    string values. Callers sometimes pass literal newlines; this replaces them
+    with \\n, \\r, \\t only inside quoted strings so json.loads() succeeds.
+    """
+    result: list[str] = []
+    i = 0
+    in_string = False
+    escape_next = False
+    quote_char = '"'
+    while i < len(s):
+        c = s[i]
+        if escape_next:
+            result.append(c)
+            escape_next = False
+            i += 1
+            continue
+        if c == "\\" and in_string:
+            result.append(c)
+            escape_next = True
+            i += 1
+            continue
+        if c == quote_char and not escape_next:
+            in_string = not in_string
+            result.append(c)
+            i += 1
+            continue
+        if in_string and c in ("\n", "\r", "\t"):
+            result.append({"\n": "\\n", "\r": "\\r", "\t": "\\t"}[c])
+            i += 1
+            continue
+        if in_string and ord(c) < 32:
+            result.append(f"\\u{ord(c):04x}")
+            i += 1
+            continue
+        result.append(c)
+        i += 1
+    return "".join(result)
+
+
 def _parse_additional_fields(
     additional_fields: dict[str, Any] | str | None,
 ) -> dict[str, Any]:
@@ -99,6 +141,17 @@ def _parse_additional_fields(
                 )
             return parsed
         except json.JSONDecodeError as e:
+            if "control character" in str(e).lower():
+                try:
+                    sanitized = _sanitize_json_control_chars(additional_fields)
+                    parsed = json.loads(sanitized)
+                    if not isinstance(parsed, dict):
+                        raise ValueError(
+                            "Parsed additional_fields is not a JSON object (dict)."
+                        ) from e
+                    return parsed
+                except json.JSONDecodeError:
+                    pass
             raise ValueError(f"additional_fields is not valid JSON: {e}") from e
     raise ValueError("additional_fields must be a dictionary or JSON string.")
 

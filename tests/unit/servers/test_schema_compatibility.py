@@ -316,6 +316,15 @@ class TestNarrowedParameterRegression:
         with pytest.raises(ValueError, match="not a JSON object"):
             _parse_additional_fields('["a", "b"]')
 
+    def test_parse_additional_fields_sanitizes_control_chars_in_strings(self) -> None:
+        """Literal newlines/tabs inside JSON string values are escaped and parsed."""
+        from mcp_atlassian.servers.jira import _parse_additional_fields
+
+        # Invalid JSON: literal newline inside a string value
+        raw = '{"description": "Line 1\nLine 2", "summary": "OK"}'
+        result = _parse_additional_fields(raw)
+        assert result == {"description": "Line 1\nLine 2", "summary": "OK"}
+
     def test_csv_split_issue_keys(self) -> None:
         """CSV string splitting for issue keys works correctly."""
         csv = "PROJ-123, PROJ-456 , PROJ-789"
