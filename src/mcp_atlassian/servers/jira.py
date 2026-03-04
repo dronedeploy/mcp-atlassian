@@ -114,6 +114,55 @@ def _sanitize_json_control_chars(s: str) -> str:
     return "".join(result)
 
 
+def _sanitize_json_unescaped_quotes(s: str) -> str:
+    """Escape unescaped double-quotes that appear inside JSON string values.
+
+    When callers build JSON by concatenation, values can contain raw " which
+    causes 'Expecting \',\' delimiter' errors. Only escape " when the next
+    non-whitespace character is not structural (:, ,, }, ]).
+    """
+    result: list[str] = []
+    i = 0
+    in_string = False
+    escape_next = False
+    while i < len(s):
+        c = s[i]
+        if escape_next:
+            result.append(c)
+            escape_next = False
+            i += 1
+            continue
+        if c == "\\" and in_string:
+            result.append(c)
+            escape_next = True
+            i += 1
+            continue
+        if c == '"':
+            if not in_string:
+                in_string = True
+                result.append(c)
+                i += 1
+                continue
+            # Inside a string. Peek next non-whitespace; if structural, this " closes the string.
+            j = i + 1
+            while j < len(s) and s[j] in " \t\n\r":
+                j += 1
+            next_non_ws = s[j] if j < len(s) else ""
+            if next_non_ws in (":", ",", "}", "]", ""):
+                in_string = False
+                result.append(c)
+                i += 1
+                continue
+            # Mid-string unescaped quote
+            result.append("\\")
+            result.append(c)
+            i += 1
+            continue
+        result.append(c)
+        i += 1
+    return "".join(result)
+
+
 def _parse_additional_fields(
     additional_fields: dict[str, Any] | str | None,
 ) -> dict[str, Any]:
@@ -141,9 +190,21 @@ def _parse_additional_fields(
                 )
             return parsed
         except json.JSONDecodeError as e:
-            if "control character" in str(e).lower():
+            err_msg = str(e).lower()
+            if "control character" in err_msg:
                 try:
                     sanitized = _sanitize_json_control_chars(additional_fields)
+                    parsed = json.loads(sanitized)
+                    if not isinstance(parsed, dict):
+                        raise ValueError(
+                            "Parsed additional_fields is not a JSON object (dict)."
+                        ) from e
+                    return parsed
+                except json.JSONDecodeError:
+                    pass
+            if "expecting" in err_msg and ("delimiter" in err_msg or "value" in err_msg):
+                try:
+                    sanitized = _sanitize_json_unescaped_quotes(additional_fields)
                     parsed = json.loads(sanitized)
                     if not isinstance(parsed, dict):
                         raise ValueError(

@@ -325,6 +325,15 @@ class TestNarrowedParameterRegression:
         result = _parse_additional_fields(raw)
         assert result == {"description": "Line 1\nLine 2", "summary": "OK"}
 
+    def test_parse_additional_fields_sanitizes_unescaped_quotes_in_strings(self) -> None:
+        """Unescaped double-quotes inside a string value are escaped and parsed."""
+        from mcp_atlassian.servers.jira import _parse_additional_fields
+
+        # Invalid JSON: unescaped " inside value causes Expecting ',' delimiter
+        raw = '{"summary": "Say "hi" here", "key": "value"}'
+        result = _parse_additional_fields(raw)
+        assert result == {"summary": 'Say "hi" here', "key": "value"}
+
     def test_csv_split_issue_keys(self) -> None:
         """CSV string splitting for issue keys works correctly."""
         csv = "PROJ-123, PROJ-456 , PROJ-789"
