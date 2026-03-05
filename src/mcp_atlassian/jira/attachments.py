@@ -467,3 +467,40 @@ class AttachmentsMixin(JiraClient, AttachmentsOperationsProto):
             "uploaded": uploaded,
             "failed": failed,
         }
+
+    def delete_attachment(self, attachment_id: str) -> dict[str, Any]:
+        """
+        Permanently delete an attachment from a Jira issue.
+
+        Uses the JIRA REST API: DELETE /rest/api/3/attachment/{id} (Cloud) or
+        /rest/api/2/attachment/{id} (Server/Data Center). Attachment IDs can be
+        obtained from get_issue_attachments or from the issue's attachment list.
+
+        Args:
+            attachment_id: The ID of the attachment to delete (e.g. "178215").
+
+        Returns:
+            A dictionary with success (bool), message or error, and attachment_id.
+        """
+        if not attachment_id or not str(attachment_id).strip():
+            logger.error("No attachment ID provided for deletion")
+            return {"success": False, "error": "No attachment ID provided", "attachment_id": ""}
+        attachment_id = str(attachment_id).strip()
+        try:
+            base = getattr(self.jira, "url", None) or getattr(self.config, "url", "")
+            if not base:
+                logger.error("Cannot determine JIRA base URL for delete attachment")
+                return {"success": False, "error": "JIRA base URL not available", "attachment_id": attachment_id}
+            base = base.rstrip("/")
+            api_version = "3" if getattr(self.config, "is_cloud", True) else "2"
+            url = f"{base}/rest/api/{api_version}/attachment/{attachment_id}"
+            headers = {"X-Atlassian-Token": "no-check"}
+            logger.info(f"Deleting JIRA attachment {attachment_id}")
+            response = self.jira._session.delete(url, headers=headers, timeout=self.config.timeout)
+            response.raise_for_status()
+            logger.info(f"Successfully deleted attachment {attachment_id}")
+            return {"success": True, "message": f"Attachment {attachment_id} deleted", "attachment_id": attachment_id}
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error deleting attachment {attachment_id}: {error_msg}")
+            return {"success": False, "error": error_msg, "attachment_id": attachment_id}

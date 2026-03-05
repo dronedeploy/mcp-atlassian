@@ -1316,3 +1316,33 @@ class TestAttachmentsMixin:
         assert result[1].filename == "report.pdf"
         # No download calls should have been made
         attachments_mixin.jira._session.get.assert_not_called()
+
+    # Tests for delete_attachment method
+
+    def test_delete_attachment_no_id(self, attachments_mixin: AttachmentsMixin):
+        """Test delete_attachment with empty attachment ID."""
+        result = attachments_mixin.delete_attachment("")
+        assert result["success"] is False
+        assert "No attachment ID provided" in result["error"]
+        assert result["attachment_id"] == ""
+
+    def test_delete_attachment_success(self, attachments_mixin: AttachmentsMixin):
+        """Test successful attachment deletion."""
+        attachments_mixin.jira.url = "https://example.atlassian.net"
+        attachments_mixin.config = MagicMock()
+        attachments_mixin.config.url = "https://example.atlassian.net"
+        attachments_mixin.config.is_cloud = True
+        attachments_mixin.config.timeout = 30
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        attachments_mixin.jira._session.delete.return_value = mock_response
+
+        result = attachments_mixin.delete_attachment("178215")
+
+        assert result["success"] is True
+        assert result["attachment_id"] == "178215"
+        assert "deleted" in result["message"].lower()
+        attachments_mixin.jira._session.delete.assert_called_once()
+        call_args = attachments_mixin.jira._session.delete.call_args
+        assert "178215" in call_args[0][0]
+        assert call_args[1]["headers"].get("X-Atlassian-Token") == "no-check"

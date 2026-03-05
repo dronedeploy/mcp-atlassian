@@ -1152,6 +1152,42 @@ async def get_issue_images(
 
 
 @jira_mcp.tool(
+    tags={"jira", "write", "toolset:jira_attachments"},
+    annotations={"title": "Delete Attachment", "destructiveHint": True},
+)
+@check_write_access
+async def delete_attachment(
+    ctx: Context,
+    attachment_id: Annotated[
+        str,
+        Field(
+            description=(
+                "The ID of the attachment to delete. Get IDs from jira_get_issue "
+                "with fields including attachment, or from jira_download_attachments. "
+                "Example: '178215'. This permanently removes the attachment."
+            ),
+        ),
+    ],
+) -> str:
+    """Permanently delete an attachment from a Jira issue.
+
+    Use this to remove outdated or duplicate attachments (e.g. old CSV versions)
+    so only the current file remains. Get attachment IDs from the issue's attachment
+    list (jira_get_issue with attachment field) or jira_download_attachments.
+
+    Args:
+        ctx: The FastMCP context.
+        attachment_id: The attachment ID to delete.
+
+    Returns:
+        JSON string with success, message or error, and attachment_id.
+    """
+    jira = await get_jira_fetcher(ctx)
+    result = jira.delete_attachment(attachment_id=attachment_id)
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@jira_mcp.tool(
     tags={"jira", "read", "toolset:jira_agile"},
     annotations={"title": "Get Agile Boards", "readOnlyHint": True},
 )
