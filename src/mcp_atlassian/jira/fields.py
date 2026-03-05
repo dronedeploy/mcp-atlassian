@@ -509,7 +509,20 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
                 sc = str(schema_custom or "").lower()
                 if any(x in sc for x in ("atlaskit", "richtext", "textarea", "document")):
                     return self._markdown_to_jira(value)
-        # 3. Default: return as-is
+        # 3. Default: return as-is, but coerce option-like values for JIRA Cloud
+        # (e.g. Request Type / option fields when field_definition is missing or unknown)
+        if getattr(self, "config", None) is not None and self.config.is_cloud:
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                return {"value": str(int(value))}
+            if isinstance(value, dict) and "value" in value:
+                out = {"value": str(value["value"])}
+                if "child" in value:
+                    child = value["child"]
+                    if isinstance(child, dict) and "value" in child:
+                        out["child"] = {"value": str(child["value"])}
+                    else:
+                        out["child"] = child
+                return out
         return value
 
     # -- System field handlers ------------------------------------------

@@ -855,6 +855,15 @@ class TestFormatFieldValueForWrite:
         )
         assert result == "anything"
 
+    def test_option_like_fallback_cloud_no_field_def(self, mixin):
+        """On Cloud, int or dict with 'value' is coerced to string when field_definition is None (e.g. VSR update)."""
+        assert mixin._format_field_value_for_write(
+            "customfield_10300", 3509, None
+        ) == {"value": "3509"}
+        assert mixin._format_field_value_for_write(
+            "customfield_10300", {"value": 3509}, None
+        ) == {"value": "3509"}
+
 
 class TestDatetimeTimezoneFormat:
     """Test datetime field formatting produces Jira-compatible tz offsets."""
