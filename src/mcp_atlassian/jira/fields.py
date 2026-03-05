@@ -523,6 +523,9 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
                     else:
                         out["child"] = child
                 return out
+            # Array of option-like dicts (multi-select when field def missing)
+            if isinstance(value, list) and value and isinstance(value[0], dict) and "value" in value[0]:
+                return [{"value": str(item["value"])} for item in value]
         return value
 
     # -- System field handlers ------------------------------------------
@@ -746,12 +749,15 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
             else None
         )
         if items_type == "option":
+            def _opt_val(item: Any) -> dict[str, str]:
+                """JIRA Cloud expects option value to be string."""
+                if isinstance(item, dict) and "value" in item:
+                    return {"value": str(item["value"])}
+                return {"value": str(item)}
             if isinstance(value, str):
                 return [{"value": v.strip()} for v in value.split(",") if v.strip()]
             if isinstance(value, list):
-                return [
-                    {"value": item} if isinstance(item, str) else item for item in value
-                ]
+                return [_opt_val(item) for item in value]
         elif items_type in ("version", "component"):
             if isinstance(value, list):
                 return [
