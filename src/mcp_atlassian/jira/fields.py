@@ -482,6 +482,7 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
             "components": self._format_versions_components,
             "reporter": self._format_reporter,
             "duedate": self._format_duedate,
+            "description": self._format_description,
         }.get(normalized_id)
         if system_handler:
             return system_handler(value, field_id, field_definition)
@@ -498,7 +499,16 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
             }.get(schema_type)
             if schema_handler:
                 return schema_handler(value, field_id, field_definition)
-
+            # JIRA Cloud rich-text custom fields (schema type "string") expect ADF
+            if (
+                schema_type == "string"
+                and getattr(self, "config", None) is not None
+                and self.config.is_cloud
+                and isinstance(value, str)
+            ):
+                sc = str(schema_custom or "").lower()
+                if any(x in sc for x in ("atlaskit", "richtext", "textarea", "document")):
+                    return self._markdown_to_jira(value)
         # 3. Default: return as-is
         return value
 
@@ -628,6 +638,22 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
         )
         return None
 
+    def _format_description(
+        self, value: Any, field_id: str, field_definition: dict | None
+    ) -> Any:
+        """Format description field value (ADF on Cloud, string on Server).
+
+        When description is passed via additional_fields, ensure it is converted
+        to ADF on JIRA Cloud to avoid "Operation value must be an Atlassian Document".
+        """
+        if value is None or value == "":
+            return value
+        if isinstance(value, dict) and value.get("type") == "doc":
+            return value  # Already ADF
+        if isinstance(value, str):
+            return self._markdown_to_jira(value)
+        return value
+
     # -- Schema type handlers -------------------------------------------
 
     def _format_option_with_child(
@@ -635,41 +661,58 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
     ) -> Any:
         """Format cascading select (option-with-child) field value.
 
+        JIRA Cloud expects option values to be strings; numeric values are
+        coerced to avoid "Operation value must be a string".
+
         Args:
-            value: Raw value (tuple, string, or dict).
+            value: Raw value (tuple, string, number, or dict).
             field_id: The Jira field ID.
             field_definition: Field definition dict, or None.
 
         Returns:
-            Dict with ``value`` and optional ``child`` keys.
+            Dict with ``value`` and optional ``child`` keys (values as strings).
         """
         if isinstance(value, tuple) and len(value) == 2:
             return {
-                "value": value[0],
-                "child": {"value": value[1]},
+                "value": str(value[0]),
+                "child": {"value": str(value[1])},
             }
-        if isinstance(value, str):
-            return {"value": value}
         if isinstance(value, dict):
+            if "value" in value:
+                result: dict[str, Any] = {"value": str(value["value"])}
+                if "child" in value and isinstance(value["child"], dict) and "value" in value["child"]:
+                    result["child"] = {"value": str(value["child"]["value"])}
+                elif "child" in value:
+                    result["child"] = value["child"]
+                return result
             return value
-        return value
+        if value is None:
+            return value
+        return {"value": str(value)}
 
     def _format_option(
         self, value: Any, field_id: str, field_definition: dict | None
     ) -> Any:
         """Format single-select option field value.
 
+        JIRA Cloud expects the option value to be a string (e.g. Request Type ID);
+        numeric values are coerced to string to avoid "Operation value must be a string".
+
         Args:
-            value: Raw value (string or dict).
+            value: Raw value (string, number, or dict).
             field_id: The Jira field ID.
             field_definition: Field definition dict, or None.
 
         Returns:
-            Dict with ``value`` key, or the original value.
+            Dict with ``value`` key (string), or the original value.
         """
-        if isinstance(value, str):
-            return {"value": value}
-        return value
+        if isinstance(value, dict):
+            if "value" in value:
+                return {"value": str(value["value"])}
+            return value
+        if value is None:
+            return value
+        return {"value": str(value)}
 
     def _format_array(
         self, value: Any, field_id: str, field_definition: dict | None

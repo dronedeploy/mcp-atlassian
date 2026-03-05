@@ -833,6 +833,8 @@ class TestFormatFieldValueForWrite:
         [
             ("option_string", "Critical", {"value": "Critical"}),
             ("option_dict", {"value": "Critical"}, {"value": "Critical"}),
+            # JIRA Cloud Request Type and similar expect value as string
+            ("option_int_request_type", 3509, {"value": "3509"}),
         ],
     )
     def test_option_field(self, mixin, test_id, value, expected):
