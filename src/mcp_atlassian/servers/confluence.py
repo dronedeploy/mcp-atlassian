@@ -33,7 +33,7 @@ confluence_mcp = FastMCP(
 
 
 @confluence_mcp.tool(
-    tags={"confluence", "read", "toolset:confluence_pages"},
+    tags={"confluence", "read", "toolset:confluence_pages", "toolset:security_ops"},
     annotations={"title": "Search Content", "readOnlyHint": True},
 )
 async def search(
@@ -125,7 +125,7 @@ async def search(
 
 
 @confluence_mcp.tool(
-    tags={"confluence", "read", "toolset:confluence_pages"},
+    tags={"confluence", "read", "toolset:confluence_pages", "toolset:security_ops"},
     annotations={"title": "Get Page", "readOnlyHint": True},
 )
 async def get_page(
@@ -516,7 +516,7 @@ async def add_label(
 
 
 @confluence_mcp.tool(
-    tags={"confluence", "write", "toolset:confluence_pages"},
+    tags={"confluence", "write", "toolset:confluence_pages", "toolset:security_ops"},
     annotations={"title": "Create Page", "destructiveHint": True},
 )
 @check_write_access
@@ -630,7 +630,7 @@ async def create_page(
 
 
 @confluence_mcp.tool(
-    tags={"confluence", "write", "toolset:confluence_pages"},
+    tags={"confluence", "write", "toolset:confluence_pages", "toolset:security_ops"},
     annotations={"title": "Update Page", "destructiveHint": True},
 )
 @check_write_access
@@ -791,7 +791,7 @@ async def delete_page(
 
 
 @confluence_mcp.tool(
-    tags={"confluence", "write", "toolset:confluence_pages"},
+    tags={"confluence", "write", "toolset:confluence_pages", "toolset:security_ops"},
     annotations={"title": "Move Page", "destructiveHint": True},
 )
 @check_write_access
@@ -1919,7 +1919,7 @@ async def delete_attachment(
 
 
 @confluence_mcp.tool(
-    tags={"confluence", "read", "attachments", "toolset:confluence_attachments"},
+    tags={"confluence", "read", "attachments", "toolset:confluence_attachments", "toolset:security_ops"},
     annotations={"title": "Get Page Images", "readOnlyHint": True},
 )
 async def get_page_images(

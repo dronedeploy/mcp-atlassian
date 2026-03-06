@@ -406,7 +406,7 @@ async def remove_watcher(
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_issues"},
+    tags={"jira", "read", "toolset:jira_issues", "toolset:security_ops"},
     annotations={"title": "Get Issue", "readOnlyHint": True},
 )
 async def get_issue(
@@ -498,7 +498,7 @@ async def get_issue(
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_issues"},
+    tags={"jira", "read", "toolset:jira_issues", "toolset:security_ops"},
     annotations={"title": "Search Issues", "readOnlyHint": True},
 )
 async def search(
@@ -600,7 +600,7 @@ async def search(
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_fields"},
+    tags={"jira", "read", "toolset:jira_fields", "toolset:security_ops"},
     annotations={"title": "Search Fields", "readOnlyHint": True},
 )
 async def search_fields(
@@ -715,7 +715,7 @@ def _to_values_only_payload(options: list[dict[str, Any]]) -> list[Any]:
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_fields"},
+    tags={"jira", "read", "toolset:jira_fields", "toolset:security_ops"},
     annotations={"title": "Get Field Options", "readOnlyHint": True},
 )
 async def get_field_options(
@@ -859,7 +859,7 @@ async def get_project_issues(
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_transitions"},
+    tags={"jira", "read", "toolset:jira_transitions", "toolset:security_ops"},
     annotations={"title": "Get Transitions", "readOnlyHint": True},
 )
 async def get_transitions(
@@ -917,7 +917,7 @@ async def get_worklog(
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_attachments"},
+    tags={"jira", "read", "toolset:jira_attachments", "toolset:security_ops"},
     annotations={"title": "Download Attachments", "readOnlyHint": True},
 )
 async def download_attachments(
@@ -1152,7 +1152,7 @@ async def get_issue_images(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_attachments"},
+    tags={"jira", "write", "toolset:jira_attachments", "toolset:security_ops"},
     annotations={"title": "Delete Attachment", "destructiveHint": True},
 )
 @check_write_access
@@ -1416,7 +1416,7 @@ async def get_sprint_issues(
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_links"},
+    tags={"jira", "read", "toolset:jira_links", "toolset:security_ops"},
     annotations={"title": "Get Link Types", "readOnlyHint": True},
 )
 async def get_link_types(
@@ -1451,7 +1451,7 @@ async def get_link_types(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_issues"},
+    tags={"jira", "write", "toolset:jira_issues", "toolset:security_ops"},
     annotations={"title": "Create Issue", "destructiveHint": True},
 )
 @check_write_access
@@ -1712,7 +1712,7 @@ async def batch_get_changelogs(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_issues"},
+    tags={"jira", "write", "toolset:jira_issues", "toolset:security_ops"},
     annotations={"title": "Update Issue", "destructiveHint": True},
 )
 @check_write_access
@@ -1875,7 +1875,7 @@ async def delete_issue(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_comments"},
+    tags={"jira", "write", "toolset:jira_comments", "toolset:security_ops"},
     annotations={"title": "Add Comment", "destructiveHint": True},
 )
 @check_write_access
@@ -1935,7 +1935,7 @@ async def add_comment(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_comments"},
+    tags={"jira", "write", "toolset:jira_comments", "toolset:security_ops"},
     annotations={"title": "Edit Comment", "destructiveHint": True},
 )
 @check_write_access
@@ -1975,6 +1975,45 @@ async def edit_comment(
     jira = await get_jira_fetcher(ctx)
     visibility_dict = _parse_visibility(visibility)
     result = jira.edit_comment(issue_key, comment_id, body, visibility_dict)
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@jira_mcp.tool(
+    tags={"jira", "write", "toolset:jira_comments", "toolset:security_ops"},
+    annotations={"title": "Delete Comment", "destructiveHint": True},
+)
+@check_write_access
+async def delete_comment(
+    ctx: Context,
+    issue_key: Annotated[
+        str,
+        Field(
+            description="Jira issue key (e.g., 'PROJ-123', 'ACV2-642')",
+            pattern=ISSUE_KEY_PATTERN,
+        ),
+    ],
+    comment_id: Annotated[
+        str,
+        Field(
+            description="The ID of the comment to delete. Get IDs from jira_get_issue or jira_get_issue_comments."
+        ),
+    ],
+) -> str:
+    """Permanently delete a comment from a Jira issue.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: Jira issue key.
+        comment_id: The ID of the comment to delete.
+
+    Returns:
+        JSON string with success, message, comment_id, and issue_key.
+
+    Raises:
+        ValueError: If in read-only mode or Jira client unavailable.
+    """
+    jira = await get_jira_fetcher(ctx)
+    result = jira.delete_comment(issue_key, comment_id)
     return json.dumps(result, indent=2, ensure_ascii=False)
 
 
@@ -2099,7 +2138,7 @@ async def link_to_epic(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_links"},
+    tags={"jira", "write", "toolset:jira_links", "toolset:security_ops"},
     annotations={"title": "Create Issue Link", "destructiveHint": True},
 )
 @check_write_access
@@ -2183,7 +2222,7 @@ async def create_issue_link(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_links"},
+    tags={"jira", "write", "toolset:jira_links", "toolset:security_ops"},
     annotations={"title": "Create Remote Issue Link", "destructiveHint": True},
 )
 @check_write_access
@@ -2271,7 +2310,7 @@ async def create_remote_issue_link(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_links"},
+    tags={"jira", "write", "toolset:jira_links", "toolset:security_ops"},
     annotations={"title": "Remove Issue Link", "destructiveHint": True},
 )
 @check_write_access
@@ -2300,7 +2339,7 @@ async def remove_issue_link(
 
 
 @jira_mcp.tool(
-    tags={"jira", "write", "toolset:jira_transitions"},
+    tags={"jira", "write", "toolset:jira_transitions", "toolset:security_ops"},
     annotations={"title": "Transition Issue", "destructiveHint": True},
 )
 @check_write_access

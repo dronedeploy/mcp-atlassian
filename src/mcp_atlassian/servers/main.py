@@ -825,7 +825,7 @@ main_mcp.mount(confluence_mcp, "confluence")
 
 
 @main_mcp.tool(
-    tags={"server"},
+    tags={"server", "toolset:security_ops"},
     annotations={"title": "Get Server Version", "readOnlyHint": True},
 )
 async def get_server_version() -> str:

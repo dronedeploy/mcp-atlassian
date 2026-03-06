@@ -6,6 +6,7 @@ from mcp_atlassian.utils.toolsets import (
     ALL_TOOLSETS,
     DEFAULT_TOOLSETS,
     TOOLSET_TAG_PREFIX,
+    get_all_toolset_tags,
     get_enabled_toolsets,
     get_toolset_tag,
     should_include_tool_by_toolset,
@@ -34,12 +35,12 @@ class TestGetEnabledToolsets:
         assert result == expected
 
     def test_all_keyword(self, monkeypatch):
-        """Test 'all' keyword returns all 21 toolset names."""
+        """Test 'all' keyword returns all toolset names."""
         monkeypatch.setenv("TOOLSETS", "all")
         result = get_enabled_toolsets()
         assert result is not None
         assert result == set(ALL_TOOLSETS.keys())
-        assert len(result) == 21
+        assert len(result) == 22
 
     def test_all_keyword_case_insensitive(self, monkeypatch):
         """Test 'ALL' keyword is case-insensitive."""
@@ -47,7 +48,7 @@ class TestGetEnabledToolsets:
         result = get_enabled_toolsets()
         assert result is not None
         assert result == set(ALL_TOOLSETS.keys())
-        assert len(result) == 21
+        assert len(result) == 22
 
     def test_default_keyword(self, monkeypatch):
         """Test 'default' keyword returns 6 default toolset names."""
@@ -91,8 +92,8 @@ class TestGetEnabledToolsets:
         assert DEFAULT_TOOLSETS == expected_defaults
 
     def test_all_toolsets_count(self):
-        """Verify ALL_TOOLSETS has exactly 21 entries."""
-        assert len(ALL_TOOLSETS) == 21
+        """Verify ALL_TOOLSETS has exactly 22 entries (15 Jira + 6 Confluence + security_ops)."""
+        assert len(ALL_TOOLSETS) == 22
 
     def test_all_toolsets_contains_jira_and_confluence(self):
         """Verify ALL_TOOLSETS has both Jira and Confluence toolsets."""
@@ -157,6 +158,18 @@ class TestShouldIncludeToolByToolset:
         enabled = {"jira_issues", "jira_agile", "jira_fields"}
         assert should_include_tool_by_toolset(tool_tags, enabled) is False
 
+    def test_multi_tag_tool_included_when_any_tag_enabled(self):
+        """Tool with multiple toolset tags is included if any tag is in enabled set."""
+        tool_tags = {"jira", "read", "toolset:jira_issues", "toolset:security_ops"}
+        enabled = {"security_ops"}
+        assert should_include_tool_by_toolset(tool_tags, enabled) is True
+
+    def test_multi_tag_tool_excluded_when_no_tag_enabled(self):
+        """Tool with multiple toolset tags is excluded when none match."""
+        tool_tags = {"jira", "read", "toolset:jira_issues", "toolset:security_ops"}
+        enabled = {"jira_agile", "jira_worklog"}
+        assert should_include_tool_by_toolset(tool_tags, enabled) is False
+
 
 class TestGetToolsetTag:
     """Tests for get_toolset_tag() helper."""
@@ -176,8 +189,31 @@ class TestGetToolsetTag:
         assert get_toolset_tag(set()) is None
 
 
+class TestGetAllToolsetTags:
+    """Tests for get_all_toolset_tags() helper."""
+
+    def test_extracts_single_toolset_tag(self):
+        """Extract single toolset tag."""
+        tags = {"jira", "read", "toolset:jira_issues"}
+        assert get_all_toolset_tags(tags) == {"jira_issues"}
+
+    def test_extracts_multiple_toolset_tags(self):
+        """Extract multiple toolset tags (e.g. security_ops tools)."""
+        tags = {"jira", "read", "toolset:jira_issues", "toolset:security_ops"}
+        assert get_all_toolset_tags(tags) == {"jira_issues", "security_ops"}
+
+    def test_no_toolset_tag_returns_empty(self):
+        """Returns empty set when no toolset tag exists."""
+        tags = {"jira", "read"}
+        assert get_all_toolset_tags(tags) == set()
+
+    def test_empty_tags(self):
+        """Returns empty set for empty tag set."""
+        assert get_all_toolset_tags(set()) == set()
+
+
 class TestToolsetTagCompleteness:
-    """Verify every registered tool has exactly one valid toolset tag."""
+    """Verify every registered tool has at least one valid toolset tag (may have multiple, e.g. security_ops)."""
 
     @pytest.fixture()
     def jira_tools(self):
@@ -206,42 +242,40 @@ class TestToolsetTagCompleteness:
             loop.close()
 
     def test_jira_tools_have_toolset_tag(self, jira_tools):
-        """Every Jira tool must have exactly one toolset:* tag."""
+        """Every Jira tool must have at least one toolset:* tag (may have two, e.g. security_ops)."""
         for name, tool in jira_tools.items():
             tags = tool.tags if hasattr(tool, "tags") else set()
             toolset_tags = [t for t in tags if t.startswith(TOOLSET_TAG_PREFIX)]
-            assert len(toolset_tags) == 1, (
+            assert len(toolset_tags) >= 1, (
                 f"Jira tool '{name}' has {len(toolset_tags)} toolset tags "
-                f"(expected 1): {toolset_tags}"
+                f"(expected at least 1): {toolset_tags}"
             )
 
     def test_confluence_tools_have_toolset_tag(self, confluence_tools):
-        """Every Confluence tool must have exactly one toolset:* tag."""
+        """Every Confluence tool must have at least one toolset:* tag (may have two, e.g. security_ops)."""
         for name, tool in confluence_tools.items():
             tags = tool.tags if hasattr(tool, "tags") else set()
             toolset_tags = [t for t in tags if t.startswith(TOOLSET_TAG_PREFIX)]
-            assert len(toolset_tags) == 1, (
+            assert len(toolset_tags) >= 1, (
                 f"Confluence tool '{name}' has {len(toolset_tags)} toolset "
-                f"tags (expected 1): {toolset_tags}"
+                f"tags (expected at least 1): {toolset_tags}"
             )
 
     def test_jira_toolset_tags_are_valid(self, jira_tools):
-        """Every Jira tool's toolset tag must reference a valid toolset."""
+        """Every Jira tool's toolset tag(s) must reference valid toolsets."""
         for name, tool in jira_tools.items():
             tags = tool.tags if hasattr(tool, "tags") else set()
-            toolset_name = get_toolset_tag(tags)
-            if toolset_name is not None:
+            for toolset_name in get_all_toolset_tags(tags):
                 assert toolset_name in ALL_TOOLSETS, (
                     f"Jira tool '{name}' has unknown toolset "
                     f"'{toolset_name}' (not in ALL_TOOLSETS)"
                 )
 
     def test_confluence_toolset_tags_are_valid(self, confluence_tools):
-        """Every Confluence tool's toolset tag must reference a valid toolset."""
+        """Every Confluence tool's toolset tag(s) must reference valid toolsets."""
         for name, tool in confluence_tools.items():
             tags = tool.tags if hasattr(tool, "tags") else set()
-            toolset_name = get_toolset_tag(tags)
-            if toolset_name is not None:
+            for toolset_name in get_all_toolset_tags(tags):
                 assert toolset_name in ALL_TOOLSETS, (
                     f"Confluence tool '{name}' has unknown toolset "
                     f"'{toolset_name}' (not in ALL_TOOLSETS)"
@@ -249,7 +283,7 @@ class TestToolsetTagCompleteness:
 
     def test_jira_tool_count(self, jira_tools):
         """Verify expected number of Jira tools."""
-        assert len(jira_tools) == 50, f"Expected 50 Jira tools, got {len(jira_tools)}"
+        assert len(jira_tools) == 51, f"Expected 51 Jira tools, got {len(jira_tools)}"
 
     def test_confluence_tool_count(self, confluence_tools):
         """Verify expected number of Confluence tools."""

@@ -1,7 +1,7 @@
 """Toolset definitions and filtering utilities for MCP Atlassian.
 
-Groups 73 tools into 21 named toolsets controlled via the TOOLSETS env var.
-Supports 'all', 'default', and comma-separated toolset names.
+Groups 73+ tools into 22 named toolsets controlled via the TOOLSETS env var.
+Supports 'all', 'default', and comma-separated toolset names (e.g. security_ops).
 """
 
 import logging
@@ -137,11 +137,22 @@ CONFLUENCE_TOOLSETS: dict[str, ToolsetDefinition] = {
     ),
 }
 
+# --- Security-ops curated toolset (subset of JIRA + Confluence + server) ---
+
+SECURITY_OPS_TOOLSET: dict[str, ToolsetDefinition] = {
+    "security_ops": ToolsetDefinition(
+        name="security_ops",
+        description="Curated set for security-ops workflows: JIRA issue/comment/link/transition/field/attachment, Confluence page/search/images/create/move, get_server_version",
+        default=False,
+    ),
+}
+
 # --- Combined registry ---
 
 ALL_TOOLSETS: dict[str, ToolsetDefinition] = {
     **JIRA_TOOLSETS,
     **CONFLUENCE_TOOLSETS,
+    **SECURITY_OPS_TOOLSET,
 }
 
 DEFAULT_TOOLSETS: set[str] = {
@@ -152,7 +163,7 @@ DEFAULT_TOOLSETS: set[str] = {
 def get_enabled_toolsets() -> set[str]:
     """Parse the TOOLSETS env var into a set of enabled toolset names.
 
-    Supports keywords 'all' (all 21 toolsets) and 'default' (6 defaults),
+    Supports keywords 'all' (all toolsets) and 'default' (6 defaults),
     plus comma-separated specific toolset names. Case-insensitive for keywords.
 
     When TOOLSETS is unset or empty, returns all toolsets with a deprecation
@@ -167,7 +178,7 @@ def get_enabled_toolsets() -> set[str]:
     Examples:
         TOOLSETS unset -> all 21 toolsets (with deprecation warning)
         TOOLSETS="" -> all 21 toolsets (with deprecation warning)
-        TOOLSETS="all" -> all 21 names
+        TOOLSETS="all" -> all toolset names
         TOOLSETS="default" -> 6 default names
         TOOLSETS="default,jira_agile" -> defaults + jira_agile
         TOOLSETS="typo_name" -> set() (fail-closed)
@@ -225,6 +236,10 @@ def should_include_tool_by_toolset(
 ) -> bool:
     """Check if a tool should be included based on toolset filtering.
 
+    A tool may have multiple toolset tags (e.g. toolset:jira_issues and
+    toolset:security_ops). The tool is included if any of its toolset tags
+    is in enabled_toolsets.
+
     Args:
         tool_tags: The tool's tag set (e.g. {"jira", "read", "toolset:jira_issues"}).
         enabled_toolsets: Set of enabled toolset names, or None to include all tools.
@@ -236,20 +251,20 @@ def should_include_tool_by_toolset(
     if enabled_toolsets is None:
         return True
 
-    toolset_name = get_toolset_tag(tool_tags)
-    if toolset_name is None:
-        # Server-level tools (e.g. get_server_version) intentionally have no toolset
+    tool_sets = get_all_toolset_tags(tool_tags)
+    if not tool_sets:
+        # Server-level tools (e.g. get_server_version) may have only "server" tag
         if "server" not in tool_tags:
             logger.warning(
                 f"Tool has no toolset tag in {tool_tags} — including by default."
             )
         return True
 
-    return toolset_name in enabled_toolsets
+    return bool(tool_sets & enabled_toolsets)
 
 
 def get_toolset_tag(tags: set[str]) -> str | None:
-    """Extract the toolset name from a tool's tag set.
+    """Extract the first toolset name from a tool's tag set.
 
     Args:
         tags: The tool's tag set.
@@ -261,3 +276,23 @@ def get_toolset_tag(tags: set[str]) -> str | None:
         if tag.startswith(TOOLSET_TAG_PREFIX):
             return tag[len(TOOLSET_TAG_PREFIX) :]
     return None
+
+
+def get_all_toolset_tags(tags: set[str]) -> set[str]:
+    """Extract all toolset names from a tool's tag set.
+
+    Tools may belong to multiple toolsets (e.g. jira_issues and security_ops).
+    Used for filtering when TOOLSETS=security_ops so tools tagged with
+    toolset:security_ops are included regardless of their primary toolset.
+
+    Args:
+        tags: The tool's tag set.
+
+    Returns:
+        Set of toolset names (without prefix). Empty if none.
+    """
+    result: set[str] = set()
+    for tag in tags:
+        if tag.startswith(TOOLSET_TAG_PREFIX):
+            result.add(tag[len(TOOLSET_TAG_PREFIX) :])
+    return result
