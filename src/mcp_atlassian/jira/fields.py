@@ -500,6 +500,9 @@ class FieldsMixin(JiraClient, EpicOperationsProto, UsersOperationsProto):
             if schema_handler:
                 return schema_handler(value, field_id, field_definition)
             # JIRA Cloud rich-text custom fields (schema type "string") expect ADF
+            # Exception: Acceptance Criteria (customfield_10400) stores plain text in OPS
+            if field_id == "customfield_10400" and isinstance(value, str):
+                return value
             if (
                 schema_type == "string"
                 and getattr(self, "config", None) is not None

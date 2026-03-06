@@ -43,6 +43,8 @@ from mcp_atlassian.utils.toolsets import (
 )
 from mcp_atlassian.utils.urls import is_atlassian_cloud_url, validate_url_for_ssrf
 
+from mcp_atlassian import __version__ as mcp_atlassian_version
+
 from .client_storage import build_oauth_client_storage_from_env
 from .confluence import confluence_mcp
 from .context import MainAppContext
@@ -120,7 +122,10 @@ async def health_check(request: Request) -> JSONResponse:
 
 @asynccontextmanager
 async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict[str, Any]]:
-    logger.info("Main Atlassian MCP server lifespan starting...")
+    logger.info(
+        "Main Atlassian MCP server lifespan starting (mcp-atlassian version: %s)",
+        mcp_atlassian_version,
+    )
     services = get_available_services()
     read_only = is_read_only_mode()
     enabled_tools = get_enabled_tools()
@@ -817,6 +822,18 @@ main_mcp = AtlassianMCP(
 )
 main_mcp.mount(jira_mcp, "jira")
 main_mcp.mount(confluence_mcp, "confluence")
+
+
+@main_mcp.tool(
+    tags={"server"},
+    annotations={"title": "Get Server Version", "readOnlyHint": True},
+)
+async def get_server_version() -> str:
+    """Return the mcp-atlassian server version. Use this to confirm the running image or build after updates."""
+    return json.dumps(
+        {"name": "mcp-atlassian", "version": mcp_atlassian_version},
+        indent=2,
+    )
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)

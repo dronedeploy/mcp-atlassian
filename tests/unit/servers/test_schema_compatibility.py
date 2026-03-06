@@ -99,12 +99,19 @@ def test_no_anyof_in_schema(tool_name: str, all_tool_schemas: dict[str, dict]) -
     )
 
 
+# Zero-arg tools allowed for server introspection (e.g. get_server_version).
+_TOOLS_ALLOWED_ZERO_ARGS = {"get_server_version"}
+
+
 @pytest.mark.parametrize("tool_name", ALL_TOOL_NAMES)
 def test_has_parameters(tool_name: str, all_tool_schemas: dict[str, dict]) -> None:
     """OpenAI gateways / LiteLLM choke on zero-argument tools.
 
-    Every tool must have at least one property in its input schema.
+    Every tool must have at least one property in its input schema, except
+    server introspection tools (e.g. get_server_version) which are zero-arg by design.
     """
+    if tool_name in _TOOLS_ALLOWED_ZERO_ARGS:
+        pytest.skip(f"Tool '{tool_name}' is allowed to have no parameters")
     schema = all_tool_schemas[tool_name]
     properties = schema.get("properties", {})
     assert properties, f"Tool '{tool_name}' has no properties (zero-arg tool)"

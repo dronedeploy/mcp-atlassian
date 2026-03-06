@@ -29,6 +29,20 @@ logger = logging.getLogger("mcp-jira")
 _EPIC_LINK_ALIASES = frozenset({"epickey", "epic_link", "epiclink", "epic link"})
 
 
+def _coerce_option_values_to_string(obj: Any) -> None:
+    """Recursively ensure any option-like 'value' in obj is a string (JIRA Cloud requirement). Mutates in place."""
+    if isinstance(obj, dict):
+        if "value" in obj and not isinstance(obj["value"], str):
+            obj["value"] = str(obj["value"])
+        if "child" in obj and isinstance(obj["child"], dict) and "value" in obj["child"] and not isinstance(obj["child"]["value"], str):
+            obj["child"]["value"] = str(obj["child"]["value"])
+        for v in obj.values():
+            _coerce_option_values_to_string(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _coerce_option_values_to_string(item)
+
+
 class IssuesMixin(
     JiraClient,
     AttachmentsOperationsProto,
@@ -1128,6 +1142,8 @@ class IssuesMixin(
 
             # Update the issue fields (use v3 API on Cloud for ADF description)
             if update_fields:
+                if self.config.is_cloud:
+                    _coerce_option_values_to_string(update_fields)
                 has_adf = isinstance(update_fields.get("description"), dict)
                 if has_adf and self.config.is_cloud:
                     self._put_api3(
@@ -1194,6 +1210,8 @@ class IssuesMixin(
 
         # First update any fields if needed
         if fields:
+            if self.config.is_cloud:
+                _coerce_option_values_to_string(fields)
             self.jira.update_issue(issue_key=issue_key, update={"fields": fields})
 
         # If no status change is requested, return the issue

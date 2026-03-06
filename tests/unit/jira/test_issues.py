@@ -5,7 +5,7 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 
 from mcp_atlassian.jira import JiraFetcher
-from mcp_atlassian.jira.issues import IssuesMixin, logger
+from mcp_atlassian.jira.issues import IssuesMixin, _coerce_option_values_to_string, logger
 from mcp_atlassian.models.jira import JiraIssue
 from tests.utils.mocks import setup_api3_passthrough_mocks
 
@@ -798,6 +798,20 @@ class TestIssuesMixin:
             Exception, match="Error deleting issue TEST-123: Delete failed"
         ):
             issues_mixin.delete_issue("TEST-123")
+
+    def test_coerce_option_values_to_string(self):
+        """Test _coerce_option_values_to_string mutates option-like values to strings."""
+        payload = {
+            "customfield_10001": {"value": 3509},
+            "customfield_10002": [{"value": 100}, {"value": "already_str"}],
+            "customfield_10003": {"value": "ok", "child": {"value": 42}},
+        }
+        _coerce_option_values_to_string(payload)
+        assert payload["customfield_10001"]["value"] == "3509"
+        assert payload["customfield_10002"][0]["value"] == "100"
+        assert payload["customfield_10002"][1]["value"] == "already_str"
+        assert payload["customfield_10003"]["value"] == "ok"
+        assert payload["customfield_10003"]["child"]["value"] == "42"
 
     def test_process_additional_fields_with_fixversions(
         self, issues_mixin: IssuesMixin
