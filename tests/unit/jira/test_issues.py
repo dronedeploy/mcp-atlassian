@@ -800,11 +800,13 @@ class TestIssuesMixin:
             issues_mixin.delete_issue("TEST-123")
 
     def test_coerce_option_values_to_string(self):
-        """Test _coerce_option_values_to_string mutates option-like values to strings."""
+        """Test _coerce_option_values_to_string mutates option-like value/id to strings."""
         payload = {
             "customfield_10001": {"value": 3509},
             "customfield_10002": [{"value": 100}, {"value": "already_str"}],
             "customfield_10003": {"value": "ok", "child": {"value": 42}},
+            "customfield_10004": {"id": 12345},
+            "reporter": {"id": 999, "value": 888},
         }
         _coerce_option_values_to_string(payload)
         assert payload["customfield_10001"]["value"] == "3509"
@@ -812,6 +814,9 @@ class TestIssuesMixin:
         assert payload["customfield_10002"][1]["value"] == "already_str"
         assert payload["customfield_10003"]["value"] == "ok"
         assert payload["customfield_10003"]["child"]["value"] == "42"
+        assert payload["customfield_10004"]["id"] == "12345"
+        assert payload["reporter"]["id"] == "999"
+        assert payload["reporter"]["value"] == "888"
 
     def test_process_additional_fields_with_fixversions(
         self, issues_mixin: IssuesMixin

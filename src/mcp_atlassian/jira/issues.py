@@ -30,12 +30,18 @@ _EPIC_LINK_ALIASES = frozenset({"epickey", "epic_link", "epiclink", "epic link"}
 
 
 def _coerce_option_values_to_string(obj: Any) -> None:
-    """Recursively ensure any option-like 'value' in obj is a string (JIRA Cloud requirement). Mutates in place."""
+    """Recursively ensure option-like 'value' and 'id' in obj are strings (JIRA Cloud requirement). Mutates in place."""
     if isinstance(obj, dict):
         if "value" in obj and not isinstance(obj["value"], str):
             obj["value"] = str(obj["value"])
-        if "child" in obj and isinstance(obj["child"], dict) and "value" in obj["child"] and not isinstance(obj["child"]["value"], str):
-            obj["child"]["value"] = str(obj["child"]["value"])
+        if "id" in obj and not isinstance(obj["id"], str):
+            obj["id"] = str(obj["id"])
+        if "child" in obj and isinstance(obj["child"], dict):
+            c = obj["child"]
+            if "value" in c and not isinstance(c["value"], str):
+                c["value"] = str(c["value"])
+            if "id" in c and not isinstance(c["id"], str):
+                c["id"] = str(c["id"])
         for v in obj.values():
             _coerce_option_values_to_string(v)
     elif isinstance(obj, list):
