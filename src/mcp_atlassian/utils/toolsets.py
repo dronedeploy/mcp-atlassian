@@ -238,9 +238,11 @@ def should_include_tool_by_toolset(
 
     toolset_name = get_toolset_tag(tool_tags)
     if toolset_name is None:
-        logger.warning(
-            f"Tool has no toolset tag in {tool_tags} — including by default."
-        )
+        # Server-level tools (e.g. get_server_version) intentionally have no toolset
+        if "server" not in tool_tags:
+            logger.warning(
+                f"Tool has no toolset tag in {tool_tags} — including by default."
+            )
         return True
 
     return toolset_name in enabled_toolsets
