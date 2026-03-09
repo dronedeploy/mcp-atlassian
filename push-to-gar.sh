@@ -39,6 +39,7 @@ echo ""
 echo "🔨 Building Docker image..."
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
+  --build-arg GIT_HASH="${GIT_HASH}" \
   -t ${GAR_IMAGE}:${BRANCH_NAME} \
   -t ${GAR_IMAGE}:${GIT_HASH} \
   -t ${GAR_IMAGE}:latest \

@@ -39,6 +39,10 @@ RUN find /app/.venv -name '__pycache__' -type d -exec rm -rf {} + && \
 # Final stage
 FROM python:3.13-alpine
 
+# Build revision (git short hash) injected at build time for get_server_version
+ARG GIT_HASH=unknown
+ENV MCP_ATLASSIAN_BUILD_REVISION=$GIT_HASH
+
 # Create a non-root user 'app'
 RUN adduser -D -h /home/app -s /bin/sh app
 WORKDIR /app

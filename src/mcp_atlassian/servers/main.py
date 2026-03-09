@@ -824,16 +824,25 @@ main_mcp.mount(jira_mcp, "jira")
 main_mcp.mount(confluence_mcp, "confluence")
 
 
+def _get_server_version_payload() -> dict[str, str]:
+    """Build the server version payload. Uses MCP_ATLASSIAN_BUILD_REVISION when set (e.g. Docker build)."""
+    revision = (os.environ.get("MCP_ATLASSIAN_BUILD_REVISION") or "").strip()
+    if revision and revision != "unknown":
+        return {
+            "name": "mcp-atlassian",
+            "version": f"{mcp_atlassian_version}+{revision}",
+            "revision": revision,
+        }
+    return {"name": "mcp-atlassian", "version": mcp_atlassian_version}
+
+
 @main_mcp.tool(
     tags={"server", "toolset:security_ops"},
     annotations={"title": "Get Server Version", "readOnlyHint": True},
 )
 async def get_server_version() -> str:
     """Return the mcp-atlassian server version. Use this to confirm the running image or build after updates."""
-    return json.dumps(
-        {"name": "mcp-atlassian", "version": mcp_atlassian_version},
-        indent=2,
-    )
+    return json.dumps(_get_server_version_payload(), indent=2)
 
 
 @main_mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)

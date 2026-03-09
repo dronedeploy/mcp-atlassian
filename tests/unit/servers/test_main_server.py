@@ -8,7 +8,33 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from mcp_atlassian.servers.main import UserTokenMiddleware, main_mcp
+from mcp_atlassian.servers.main import (
+    UserTokenMiddleware,
+    _get_server_version_payload,
+    main_mcp,
+)
+
+
+@pytest.mark.anyio
+async def test_get_server_version_without_revision():
+    """When MCP_ATLASSIAN_BUILD_REVISION is not set, payload has no revision key."""
+    with patch.dict(os.environ, {}, clear=False):
+        if "MCP_ATLASSIAN_BUILD_REVISION" in os.environ:
+            del os.environ["MCP_ATLASSIAN_BUILD_REVISION"]
+        payload = _get_server_version_payload()
+    assert payload["name"] == "mcp-atlassian"
+    assert "version" in payload
+    assert "revision" not in payload
+
+
+@pytest.mark.anyio
+async def test_get_server_version_with_revision():
+    """When MCP_ATLASSIAN_BUILD_REVISION is set (e.g. Docker build), version includes revision."""
+    with patch.dict(os.environ, {"MCP_ATLASSIAN_BUILD_REVISION": "a87e98b"}, clear=False):
+        payload = _get_server_version_payload()
+    assert payload["name"] == "mcp-atlassian"
+    assert payload["version"].endswith("+a87e98b")
+    assert payload["revision"] == "a87e98b"
 
 
 @pytest.mark.anyio
