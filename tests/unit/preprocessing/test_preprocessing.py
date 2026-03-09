@@ -2,7 +2,10 @@ import re
 
 import pytest
 
-from mcp_atlassian.preprocessing.confluence import ConfluencePreprocessor
+from mcp_atlassian.preprocessing.confluence import (
+    ConfluencePreprocessor,
+    _sanitize_html_for_confluence_parser,
+)
 from mcp_atlassian.preprocessing.jira import JiraPreprocessor
 from tests.fixtures.confluence_mocks import MOCK_COMMENTS_RESPONSE, MOCK_PAGE_RESPONSE
 from tests.fixtures.jira_mocks import MOCK_JIRA_ISSUE_RESPONSE
@@ -395,6 +398,48 @@ This is some **bold** and *italic* text.
     assert "<em>" in storage_format or "<i>" in storage_format  # Italic
     assert "<a href=" in storage_format.lower()  # Link
     assert "example.com" in storage_format
+
+
+def test_sanitize_html_for_confluence_parser_allowed_tags_unchanged():
+    """Allowed HTML tags and Confluence namespaced tags are left unchanged."""
+    html = "<p>Hello</p><strong>bold</strong><ac:parameter>ok</ac:parameter>"
+    out = _sanitize_html_for_confluence_parser(html)
+    assert out == html
+
+
+def test_sanitize_html_for_confluence_parser_escapes_unknown_tags():
+    """Unknown/custom tags are escaped so the XML parser does not see them."""
+    html = "<p>Name: <vendorname>Acme</vendorname></p>"
+    out = _sanitize_html_for_confluence_parser(html)
+    assert "&lt;vendorname&gt;" in out
+    assert "&lt;/vendorname&gt;" in out
+    assert "<vendorname>" not in out
+    assert "<p>" in out and "Name:" in out
+
+
+def test_sanitize_html_for_confluence_parser_mismatched_tag_escaped():
+    """Mismatched open/close tags (e.g. vendorname then strong) are escaped to avoid ParseError."""
+    html = "<p>Line with <vendorname>Foo bar</strong> text.</p>"
+    out = _sanitize_html_for_confluence_parser(html)
+    # Custom tag must be escaped; </strong> is allowed and left as-is
+    assert "&lt;vendorname&gt;" in out
+    assert "<vendorname>" not in out
+    assert "Foo bar" in out
+
+
+def test_markdown_to_confluence_storage_with_custom_tag_no_parse_error(preprocessor_with_confluence):
+    """Markdown that produces HTML with custom/mismatched tags converts without ParseError (regression)."""
+    # Raw HTML in markdown can pass through and cause md2conf's strict parser to fail (vendorname/strong mismatch).
+    # Sanitizer should escape unknown tags so conversion succeeds.
+    markdown = """# Vendor
+
+**Vendor name:** <vendorname>Acme Corp</strong>
+"""
+    storage_format = preprocessor_with_confluence.markdown_to_confluence_storage(markdown)
+    assert "Vendor" in storage_format
+    assert "Acme Corp" in storage_format
+    # Custom tag should appear escaped in output (no raw <vendorname>)
+    assert "vendorname" in storage_format or "Acme" in storage_format
 
 
 def test_process_confluence_profile_macro(preprocessor_with_confluence):
