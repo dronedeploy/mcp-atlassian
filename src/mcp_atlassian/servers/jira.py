@@ -2311,6 +2311,50 @@ async def create_remote_issue_link(
 
 @jira_mcp.tool(
     tags={"jira", "write", "toolset:jira_links", "toolset:security_ops"},
+    annotations={"title": "Remove Remote Issue Link", "destructiveHint": True},
+)
+@check_write_access
+async def remove_remote_issue_link(
+    ctx: Context,
+    issue_key: Annotated[
+        str,
+        Field(
+            description="The key of the issue that has the remote link (e.g., 'PROJ-123')",
+            pattern=ISSUE_KEY_PATTERN,
+        ),
+    ],
+    link_id: Annotated[
+        str,
+        Field(
+            description="The ID of the remote link to remove (from create response or issue remotelinks)"
+        ),
+    ],
+) -> str:
+    """Remove a remote issue link (web link or Confluence link) from a Jira issue.
+
+    Args:
+        ctx: The FastMCP context.
+        issue_key: The key of the issue that has the remote link.
+        link_id: The ID of the remote link to remove.
+
+    Returns:
+        JSON string indicating success.
+
+    Raises:
+        ValueError: If issue_key or link_id is missing, in read-only mode, or Jira client unavailable.
+    """
+    jira = await get_jira_fetcher(ctx)
+    if not issue_key:
+        raise ValueError("issue_key is required.")
+    if not link_id or not str(link_id).strip():
+        raise ValueError("link_id is required.")
+
+    result = jira.remove_remote_issue_link(issue_key, str(link_id).strip())
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@jira_mcp.tool(
+    tags={"jira", "write", "toolset:jira_links", "toolset:security_ops"},
     annotations={"title": "Remove Issue Link", "destructiveHint": True},
 )
 @check_write_access

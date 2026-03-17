@@ -257,3 +257,47 @@ class CommentsMixin(JiraClient):
                 f"Error editing comment {comment_id} on issue {issue_key}: {str(e)}"
             )
             raise Exception(f"Error editing comment: {str(e)}") from e
+
+    def delete_comment(self, issue_key: str, comment_id: str) -> dict[str, Any]:
+        """
+        Permanently delete a comment from an issue.
+
+        Uses the Jira REST API: DELETE /rest/api/3/issue/{issueIdOrKey}/comment/{id}
+        (Cloud) or /rest/api/2/issue/... (Server/Data Center). Comment IDs can be
+        obtained from get_issue_comments or from the issue's comment list.
+
+        Args:
+            issue_key: The issue key (e.g. 'PROJ-123').
+            comment_id: The ID of the comment to delete.
+
+        Returns:
+            A dict with success (bool), message, and comment_id.
+
+        Raises:
+            Exception: If the comment or issue is not found or deletion fails.
+        """
+        if not comment_id or not str(comment_id).strip():
+            logger.error("No comment ID provided for deletion")
+            raise ValueError("comment_id is required to delete a comment")
+        comment_id = str(comment_id).strip()
+        try:
+            resource = f"issue/{issue_key}/comment/{comment_id}"
+            api_version = "3" if self.config.is_cloud else "2"
+            self._delete_resource(resource, api_version=api_version)
+            logger.info("Successfully deleted comment %s on issue %s", comment_id, issue_key)
+            return {
+                "success": True,
+                "message": f"Comment {comment_id} deleted from issue {issue_key}.",
+                "comment_id": comment_id,
+                "issue_key": issue_key,
+            }
+        except Exception as e:
+            logger.error(
+                "Error deleting comment %s on issue %s: %s",
+                comment_id,
+                issue_key,
+                str(e),
+            )
+            raise Exception(
+                f"Error deleting comment: {str(e)}"
+            ) from e

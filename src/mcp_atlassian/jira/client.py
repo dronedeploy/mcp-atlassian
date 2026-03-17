@@ -294,6 +294,17 @@ class JiraClient:
         url = self.jira.resource_url(resource, api_version="3")
         return self.jira.put(url, data=data)
 
+    def _delete_resource(self, resource: str, api_version: str = "3") -> None:
+        """DELETE a Jira REST API resource (e.g. issue comment)."""
+        path = self.jira.resource_url(resource, api_version=api_version)
+        base = getattr(self.jira, "url", None) or getattr(self.config, "url", "")
+        if not base:
+            raise ValueError("Cannot determine JIRA base URL for delete request")
+        base = base.rstrip("/")
+        url = f"{base}/{path}" if not path.startswith("http") else path
+        response = self.jira._session.delete(url, timeout=self.config.timeout)
+        response.raise_for_status()
+
     def get_paged(
         self,
         method: Literal["get", "post"],

@@ -245,6 +245,42 @@ def test_get_paged_without_cloud():
             client.get_paged("get", "/test/url")
 
 
+def test_delete_resource_uses_absolute_url():
+    """_delete_resource builds absolute URL so session.delete does not get a relative path."""
+    with (
+        patch("mcp_atlassian.jira.client.Jira") as mock_jira_class,
+        patch("mcp_atlassian.jira.client.configure_ssl_verification"),
+    ):
+        mock_jira = MagicMock()
+        mock_jira.url = "https://company.atlassian.net"
+        mock_jira.resource_url = MagicMock(
+            return_value="rest/api/3/issue/PROJ-1/comment/123"
+        )
+        mock_session = MagicMock()
+        mock_session.delete = MagicMock(return_value=MagicMock(raise_for_status=MagicMock()))
+        mock_jira._session = mock_session
+        mock_jira_class.return_value = mock_jira
+
+        config = JiraConfig(
+            url="https://company.atlassian.net",
+            auth_type="basic",
+            username="u",
+            api_token="t",
+            timeout=30,
+        )
+        client = JiraClient(config=config)
+        client._delete_resource("issue/PROJ-1/comment/123", api_version="3")
+
+        mock_jira.resource_url.assert_called_once_with(
+            "issue/PROJ-1/comment/123", api_version="3"
+        )
+        mock_session.delete.assert_called_once()
+        call_url = mock_session.delete.call_args[0][0]
+        assert call_url.startswith("https://")
+        assert "company.atlassian.net" in call_url
+        assert "rest/api/3/issue/PROJ-1/comment/123" in call_url
+
+
 def test_init_sets_proxies_and_no_proxy(monkeypatch):
     """Test that JiraClient sets session proxies and NO_PROXY env var from config."""
     # Patch Jira and its _session

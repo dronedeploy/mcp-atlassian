@@ -389,6 +389,7 @@ def test_jira_mcp(mock_jira_fetcher, mock_base_jira_config):
         create_issue,
         create_issue_link,
         create_sprint,
+        delete_comment,
         delete_issue,
         download_attachments,
         edit_comment,
@@ -448,6 +449,7 @@ def test_jira_mcp(mock_jira_fetcher, mock_base_jira_config):
     jira_sub_mcp.add_tool(delete_issue)
     jira_sub_mcp.add_tool(add_comment)
     jira_sub_mcp.add_tool(edit_comment)
+    jira_sub_mcp.add_tool(delete_comment)
     jira_sub_mcp.add_tool(add_worklog)
     jira_sub_mcp.add_tool(link_to_epic)
     jira_sub_mcp.add_tool(create_issue_link)
@@ -2019,6 +2021,27 @@ async def test_edit_comment(jira_client, mock_jira_fetcher):
     result = json.loads(response.content[0].text)
     assert result["id"] == "10001"
     assert result["body"] == "Updated comment body"
+
+
+@pytest.mark.anyio
+async def test_delete_comment(jira_client, mock_jira_fetcher):
+    """Test delete_comment calls fetcher and returns success payload."""
+    mock_jira_fetcher.delete_comment.return_value = {
+        "success": True,
+        "message": "Comment 10001 deleted from issue TEST-123.",
+        "comment_id": "10001",
+        "issue_key": "TEST-123",
+    }
+    response = await jira_client.call_tool(
+        "jira_delete_comment",
+        {"issue_key": "TEST-123", "comment_id": "10001"},
+    )
+
+    mock_jira_fetcher.delete_comment.assert_called_once_with("TEST-123", "10001")
+    result = json.loads(response.content[0].text)
+    assert result["success"] is True
+    assert result["comment_id"] == "10001"
+    assert result["issue_key"] == "TEST-123"
 
 
 @pytest.mark.anyio

@@ -185,6 +185,56 @@ class LinksMixin(JiraClient):
             raise Exception(f"Error creating remote issue link: {error_msg}") from e
 
     @handle_auth_errors("Jira API")
+    def remove_remote_issue_link(
+        self, issue_key: str, link_id: str
+    ) -> dict[str, Any]:
+        """
+        Remove a remote issue link (web link or Confluence link) from an issue.
+
+        Uses DELETE /rest/api/3/issue/{issueIdOrKey}/remotelink/{linkId} (Cloud)
+        or rest/api/2/... (Server/Data Center). The link_id is returned when
+        creating a remote link or from the issue's remotelinks.
+
+        Args:
+            issue_key: The key of the issue (e.g., 'PROJ-123').
+            link_id: The ID of the remote link to remove.
+
+        Returns:
+            Dictionary with success, message, issue_key, and link_id.
+
+        Raises:
+            ValueError: If issue_key or link_id is empty.
+            MCPAtlassianAuthenticationError: If authentication fails.
+            Exception: If the delete request fails.
+        """
+        if not issue_key or not str(issue_key).strip():
+            raise ValueError("Issue key is required")
+        if not link_id or not str(link_id).strip():
+            raise ValueError("Link ID is required")
+        link_id = str(link_id).strip()
+        try:
+            resource = f"issue/{issue_key}/remotelink/{link_id}"
+            api_version = "3" if self.config.is_cloud else "2"
+            self._delete_resource(resource, api_version=api_version)
+            return {
+                "success": True,
+                "message": f"Remote link {link_id} removed from issue {issue_key}.",
+                "issue_key": issue_key,
+                "link_id": link_id,
+            }
+        except HTTPError:
+            raise
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(
+                f"Error removing remote issue link: {error_msg}",
+                exc_info=True,
+            )
+            raise Exception(
+                f"Error removing remote issue link: {error_msg}"
+            ) from e
+
+    @handle_auth_errors("Jira API")
     def remove_issue_link(self, link_id: str) -> dict[str, Any]:
         """
         Remove a link between two issues.

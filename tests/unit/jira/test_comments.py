@@ -545,3 +545,52 @@ class TestCommentsMixin:
         # ServiceDesk post should NOT be called
         comments_mixin.jira.post.assert_not_called()
         assert result["id"] == "10001"
+
+    # --- delete_comment tests ---
+
+    def test_delete_comment_success_cloud(self, comments_mixin):
+        """delete_comment on Cloud calls _delete_resource with api_version 3."""
+        comments_mixin._delete_resource = Mock()
+        # Default config (atlassian.net URL) is Cloud, so is_cloud is True
+
+        result = comments_mixin.delete_comment("TEST-123", "10001")
+
+        comments_mixin._delete_resource.assert_called_once_with(
+            "issue/TEST-123/comment/10001", api_version="3"
+        )
+        assert result["success"] is True
+        assert result["comment_id"] == "10001"
+        assert result["issue_key"] == "TEST-123"
+        assert "deleted" in result["message"].lower()
+
+    def test_delete_comment_success_server(
+        self, jira_config_factory, mock_atlassian_jira
+    ):
+        """delete_comment on Server/DC uses api_version 2."""
+        config = jira_config_factory(url="https://jira.self-hosted.local")
+        mixin = CommentsMixin(config=config)
+        mixin.jira = mock_atlassian_jira
+        mixin._delete_resource = Mock()
+
+        result = mixin.delete_comment("PROJ-456", "20002")
+
+        mixin._delete_resource.assert_called_once_with(
+            "issue/PROJ-456/comment/20002", api_version="2"
+        )
+        assert result["success"] is True
+        assert result["comment_id"] == "20002"
+
+    def test_delete_comment_empty_id_raises(self, comments_mixin):
+        """delete_comment with empty comment_id raises ValueError."""
+        with pytest.raises(ValueError, match="comment_id is required"):
+            comments_mixin.delete_comment("TEST-123", "")
+        with pytest.raises(ValueError, match="comment_id is required"):
+            comments_mixin.delete_comment("TEST-123", "   ")
+
+    def test_delete_comment_api_error_raises(self, comments_mixin):
+        """delete_comment propagates API errors."""
+        comments_mixin._delete_resource = Mock(
+            side_effect=Exception("404 Comment not found")
+        )
+        with pytest.raises(Exception, match="Error deleting comment"):
+            comments_mixin.delete_comment("TEST-123", "10001")

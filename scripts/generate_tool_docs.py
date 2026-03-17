@@ -57,6 +57,7 @@ CATEGORY_TOOLS: dict[str, list[str]] = {
     "jira-comments-worklogs": [
         "jira_add_comment",
         "jira_edit_comment",
+        "jira_delete_comment",
         "jira_get_worklog",
         "jira_add_worklog",
         "jira_batch_get_changelogs",
@@ -71,6 +72,7 @@ CATEGORY_TOOLS: dict[str, list[str]] = {
         "jira_remove_issue_link",
         "jira_link_to_epic",
         "jira_create_remote_issue_link",
+        "jira_remove_remote_issue_link",
         "jira_get_project_versions",
         "jira_get_project_components",
         "jira_create_version",

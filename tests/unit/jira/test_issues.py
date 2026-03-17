@@ -818,6 +818,16 @@ class TestIssuesMixin:
         assert payload["reporter"]["id"] == "999"
         assert payload["reporter"]["value"] == "888"
 
+    def test_coerce_option_values_bare_int_customfield(self):
+        """Bare int custom field values (option IDs) are coerced to {value: str}; small ints left as-is."""
+        payload = {
+            "customfield_10100": 10002,
+            "customfield_10101": 5,
+        }
+        _coerce_option_values_to_string(payload)
+        assert payload["customfield_10100"] == {"value": "10002"}
+        assert payload["customfield_10101"] == 5
+
     def test_process_additional_fields_with_fixversions(
         self, issues_mixin: IssuesMixin
     ):

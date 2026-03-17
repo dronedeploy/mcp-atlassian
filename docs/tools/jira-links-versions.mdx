@@ -81,6 +81,21 @@ Create a remote issue link (web link or Confluence link) for a Jira issue.
 
 ---
 
+### Remove Remote Issue Link
+
+Remove a remote issue link (web link or Confluence link) from a Jira issue.
+
+<Note>This is a **write** tool. Disabled when `READ_ONLY_MODE=true`.</Note>
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `issue_key` | `string` | Yes | The key of the issue that has the remote link (e.g., 'PROJ-123', 'ACV2-642') |
+| `link_id` | `string` | Yes | The ID of the remote link to remove (from create response or issue remotelinks) |
+
+---
+
 ### Get Project Versions
 
 Get all fix versions for a specific Jira project.

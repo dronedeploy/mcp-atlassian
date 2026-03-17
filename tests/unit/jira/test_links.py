@@ -183,6 +183,42 @@ class TestLinksMixin:
         with pytest.raises(MCPAtlassianAuthenticationError):
             links_mixin.create_remote_issue_link(issue_key, link_data)
 
+    def test_remove_remote_issue_link_success(self, links_mixin):
+        issue_key = "PROJ-123"
+        link_id = "10001"
+        with patch.object(links_mixin, "_delete_resource") as mock_delete:
+            response = links_mixin.remove_remote_issue_link(issue_key, link_id)
+            assert response["success"] is True
+            assert response["issue_key"] == issue_key
+            assert response["link_id"] == link_id
+            mock_delete.assert_called_once_with(
+                f"issue/{issue_key}/remotelink/{link_id}",
+                api_version="3",
+            )
+
+    def test_remove_remote_issue_link_server_api_version(self, jira_config_factory):
+        config = jira_config_factory(url="https://jira.example.com")  # non-Cloud URL
+        mixin = LinksMixin(config=config)
+        mixin.jira = Mock()
+        with patch.object(mixin, "_delete_resource") as mock_delete:
+            mixin.remove_remote_issue_link("PROJ-1", "10002")
+            mock_delete.assert_called_once_with(
+                "issue/PROJ-1/remotelink/10002",
+                api_version="2",
+            )
+
+    def test_remove_remote_issue_link_missing_issue_key(self, links_mixin):
+        with pytest.raises(ValueError, match="Issue key is required"):
+            links_mixin.remove_remote_issue_link("", "10001")
+
+    def test_remove_remote_issue_link_missing_link_id(self, links_mixin):
+        with pytest.raises(ValueError, match="Link ID is required"):
+            links_mixin.remove_remote_issue_link("PROJ-123", "")
+
+    def test_remove_remote_issue_link_whitespace_link_id(self, links_mixin):
+        with pytest.raises(ValueError, match="Link ID is required"):
+            links_mixin.remove_remote_issue_link("PROJ-123", "   ")
+
     def test_remove_issue_link_success(self, links_mixin):
         link_id = "10000"
 

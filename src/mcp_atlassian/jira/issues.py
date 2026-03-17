@@ -30,8 +30,22 @@ _EPIC_LINK_ALIASES = frozenset({"epickey", "epic_link", "epiclink", "epic link"}
 
 
 def _coerce_option_values_to_string(obj: Any) -> None:
-    """Recursively ensure option-like 'value' and 'id' in obj are strings (JIRA Cloud requirement). Mutates in place."""
+    """Recursively ensure option-like 'value' and 'id' in obj are strings (JIRA Cloud requirement). Mutates in place.
+
+    Also converts bare numeric custom field values (e.g. customfield_xxx: 10002) to
+    {"value": "10002"} so JIRA Cloud accepts them (avoids "Operation value must be a string").
+    """
     if isinstance(obj, dict):
+        # Bare numeric values for customfield_* option fields must be {"value": "..."} (JIRA Cloud).
+        # Only coerce ints that look like option IDs (>= 1000) to avoid breaking number fields (e.g. story points).
+        for k, v in list(obj.items()):
+            if (
+                k.startswith("customfield_")
+                and isinstance(v, int)
+                and not isinstance(v, bool)
+                and abs(v) >= 1000
+            ):
+                obj[k] = {"value": str(v)}
         if "value" in obj and not isinstance(obj["value"], str):
             obj["value"] = str(obj["value"])
         if "id" in obj and not isinstance(obj["id"], str):
