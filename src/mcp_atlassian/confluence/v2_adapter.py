@@ -492,8 +492,99 @@ class ConfluenceV2Adapter:
             logger.error(f"Error creating footer comment: {e}")
             raise ValueError(f"Failed to create footer comment: {e}") from e
 
+    def create_inline_comment(
+        self,
+        *,
+        page_id: str | None = None,
+        parent_comment_id: str | None = None,
+        body: str,
+        representation: str = "storage",
+        text_selection: str | None = None,
+        text_selection_match_index: int = 0,
+        text_selection_match_count: int = 1,
+    ) -> dict[str, Any]:
+        """Create an inline comment using the v2 API (Confluence Cloud).
+
+        Top-level: ``page_id``, ``body``, and exact ``text_selection`` on the page
+        (plus match index/count when the phrase appears multiple times).
+
+        Reply: ``parent_comment_id`` and ``body`` only (same inline thread).
+
+        See Atlassian Confluence REST v2 ``POST /inline-comments``.
+
+        Args:
+            page_id: Page ID for a new top-level inline comment
+            parent_comment_id: Parent comment ID for a reply on an inline thread
+            body: Comment body (storage HTML unless representation is set)
+            representation: ``storage``, ``atlas_doc_format``, or ``wiki``
+            text_selection: Exact substring to highlight (top-level only)
+            text_selection_match_index: Zero-based occurrence to highlight
+            text_selection_match_count: Total occurrences of ``text_selection`` on the page
+
+        Returns:
+            The created comment data in v1-compatible format
+
+        Raises:
+            ValueError: If parameters are invalid or creation fails
+        """
+        if page_id and parent_comment_id:
+            raise ValueError("page_id and parent_comment_id are mutually exclusive")
+        if not page_id and not parent_comment_id:
+            raise ValueError(
+                "Either page_id (new inline comment) or parent_comment_id (reply) "
+                "must be provided"
+            )
+
+        try:
+            data: dict[str, Any] = {
+                "body": {
+                    "representation": representation,
+                    "value": body,
+                },
+            }
+
+            if parent_comment_id:
+                data["parentCommentId"] = parent_comment_id
+            else:
+                if not text_selection or not text_selection.strip():
+                    raise ValueError(
+                        "text_selection is required for a new inline comment "
+                        "(exact text to highlight on the page)"
+                    )
+                if text_selection_match_count <= text_selection_match_index:
+                    raise ValueError(
+                        "text_selection_match_count must be greater than "
+                        "text_selection_match_index (per Confluence API)"
+                    )
+                data["pageId"] = page_id
+                data["inlineCommentProperties"] = {
+                    "textSelection": text_selection,
+                    "textSelectionMatchIndex": text_selection_match_index,
+                    "textSelectionMatchCount": text_selection_match_count,
+                }
+
+            url = f"{self.base_url}/api/v2/inline-comments"
+            response = self.session.post(url, json=data)
+            response.raise_for_status()
+
+            result = response.json()
+            logger.debug("Successfully created inline comment with v2 API")
+
+            return self._convert_v2_comment_to_v1_format(
+                result, location="inline"
+            )
+
+        except Exception as e:
+            if isinstance(e, ValueError | HTTPError):
+                raise
+            logger.error(f"Error creating inline comment: {e}")
+            raise ValueError(f"Failed to create inline comment: {e}") from e
+
     def _convert_v2_comment_to_v1_format(
-        self, v2_response: dict[str, Any]
+        self,
+        v2_response: dict[str, Any],
+        *,
+        location: str = "footer",
     ) -> dict[str, Any]:
         """Convert v2 comment response to v1-compatible format.
 
@@ -502,6 +593,7 @@ class ConfluenceV2Adapter:
 
         Args:
             v2_response: The response from v2 API
+            location: ``footer`` or ``inline`` for ``extensions.location``
 
         Returns:
             Response formatted like v1 API for compatibility
@@ -531,8 +623,7 @@ class ConfluenceV2Adapter:
         if parent_id := v2_response.get("parentCommentId"):
             v1_compatible["parentCommentId"] = parent_id
 
-        # v2 footer-comments endpoint always returns footer comments
-        v1_compatible["extensions"] = {"location": "footer"}
+        v1_compatible["extensions"] = {"location": location}
 
         return v1_compatible
 

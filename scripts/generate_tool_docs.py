@@ -122,6 +122,7 @@ CATEGORY_TOOLS: dict[str, list[str]] = {
     ],
     "confluence-comments": [
         "confluence_add_comment",
+        "confluence_add_inline_comment",
         "confluence_get_comments",
         "confluence_reply_to_comment",
         "confluence_get_labels",

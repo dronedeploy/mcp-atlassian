@@ -86,6 +86,7 @@ def mock_confluence_fetcher():
         "body": "This is a test comment added via API",
     }
     mock_fetcher.add_comment.return_value = mock_comment
+    mock_fetcher.add_inline_comment.return_value = mock_comment
 
     # Mock search_user method
     mock_user_search_result = MagicMock()
@@ -188,6 +189,7 @@ def test_confluence_mcp(mock_confluence_fetcher, mock_base_confluence_config):
     # Import and register tool functions (as they are in confluence.py)
     from src.mcp_atlassian.servers.confluence import (
         add_comment,
+        add_inline_comment,
         add_label,
         create_page,
         delete_attachment,
@@ -231,6 +233,7 @@ def test_confluence_mcp(mock_confluence_fetcher, mock_base_confluence_config):
     confluence_sub_mcp.add_tool(get_space_page_tree)
     confluence_sub_mcp.add_tool(get_comments)
     confluence_sub_mcp.add_tool(add_comment)
+    confluence_sub_mcp.add_tool(add_inline_comment)
     confluence_sub_mcp.add_tool(get_labels)
     confluence_sub_mcp.add_tool(add_label)
     confluence_sub_mcp.add_tool(create_page)
@@ -257,6 +260,7 @@ def no_fetcher_test_confluence_mcp(mock_base_confluence_config):
     # Import and register tool functions (as they are in confluence.py)
     from src.mcp_atlassian.servers.confluence import (
         add_comment,
+        add_inline_comment,
         add_label,
         create_page,
         delete_attachment,
@@ -302,6 +306,7 @@ def no_fetcher_test_confluence_mcp(mock_base_confluence_config):
     confluence_sub_mcp.add_tool(get_space_page_tree)
     confluence_sub_mcp.add_tool(get_comments)
     confluence_sub_mcp.add_tool(add_comment)
+    confluence_sub_mcp.add_tool(add_inline_comment)
     confluence_sub_mcp.add_tool(get_labels)
     confluence_sub_mcp.add_tool(add_label)
     confluence_sub_mcp.add_tool(create_page)
@@ -543,6 +548,70 @@ async def test_add_comment(client, mock_confluence_fetcher):
     assert result_data["comment"]["author"] == "Test User"
     assert result_data["comment"]["body"] == "This is a test comment added via API"
     assert result_data["comment"]["created"] == "2023-08-01T13:00:00.000Z"
+
+
+@pytest.mark.anyio
+async def test_add_inline_comment_new_highlight(client, mock_confluence_fetcher):
+    """add_inline_comment forwards page_id, text_selection, and match fields."""
+    response = await client.call_tool(
+        "confluence_add_inline_comment",
+        {
+            "page_id": "123456",
+            "body": "Security note",
+            "text_selection": "password",
+            "text_selection_match_index": 0,
+            "text_selection_match_count": 1,
+        },
+    )
+
+    mock_confluence_fetcher.add_inline_comment.assert_called_once_with(
+        "Security note",
+        page_id="123456",
+        text_selection="password",
+        text_selection_match_index=0,
+        text_selection_match_count=1,
+    )
+
+    result_data = json.loads(response.content[0].text)
+    assert result_data["success"] is True
+    assert result_data["comment"]["id"] == "987"
+
+
+@pytest.mark.anyio
+async def test_add_inline_comment_reply(client, mock_confluence_fetcher):
+    """add_inline_comment with parent_comment_id only."""
+    response = await client.call_tool(
+        "confluence_add_inline_comment",
+        {
+            "parent_comment_id": "444555666",
+            "body": "Agreed",
+        },
+    )
+
+    mock_confluence_fetcher.add_inline_comment.assert_called_once_with(
+        "Agreed",
+        parent_comment_id="444555666",
+    )
+
+    result_data = json.loads(response.content[0].text)
+    assert result_data["success"] is True
+
+
+@pytest.mark.anyio
+async def test_add_inline_comment_missing_selection(client, mock_confluence_fetcher):
+    """New inline comment without text_selection returns validation error."""
+    response = await client.call_tool(
+        "confluence_add_inline_comment",
+        {
+            "page_id": "123456",
+            "body": "Note only",
+        },
+    )
+
+    mock_confluence_fetcher.add_inline_comment.assert_not_called()
+    result_data = json.loads(response.content[0].text)
+    assert result_data["success"] is False
+    assert "text_selection" in result_data["message"]
 
 
 @pytest.mark.anyio

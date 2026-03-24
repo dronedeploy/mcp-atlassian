@@ -426,6 +426,119 @@ class TestAddCommentV2Routing:
         comments_mixin.confluence.get_page_by_id.assert_not_called()
 
 
+class TestAddInlineComment:
+    """Tests for add_inline_comment (v2 inline-comments API)."""
+
+    def test_add_inline_comment_requires_v2(self, comments_mixin):
+        """Without OAuth Cloud, add_inline_comment returns None."""
+        comments_mixin.config.auth_type = "basic"
+
+        result = comments_mixin.add_inline_comment(
+            "Note",
+            page_id="12345",
+            text_selection="hello",
+        )
+
+        assert result is None
+
+    def test_add_inline_comment_top_level_oauth(self, comments_mixin):
+        """Top-level inline routes through create_inline_comment on v2 adapter."""
+        comments_mixin.config.auth_type = "oauth"
+        comments_mixin.config.url = "https://test.atlassian.net/wiki"
+
+        mock_adapter = MagicMock()
+        mock_adapter.create_inline_comment.return_value = {
+            "id": "777888999",
+            "type": "comment",
+            "status": "current",
+            "body": {
+                "view": {
+                    "value": "<p>Inline note</p>",
+                    "representation": "view",
+                },
+            },
+            "extensions": {"location": "inline"},
+            "version": {"number": 1},
+            "_links": {},
+        }
+
+        with patch.object(
+            type(comments_mixin),
+            "_v2_adapter",
+            new_callable=lambda: property(lambda self: mock_adapter),
+        ):
+            comments_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
+                "<p>Inline note</p>"
+            )
+            comments_mixin.preprocessor.process_html_content.return_value = (
+                "<p>Inline note</p>",
+                "Inline note",
+            )
+
+            result = comments_mixin.add_inline_comment(
+                "Inline note",
+                page_id="12345",
+                text_selection="exact phrase",
+                text_selection_match_index=1,
+                text_selection_match_count=3,
+            )
+
+        assert result is not None
+        mock_adapter.create_inline_comment.assert_called_once_with(
+            page_id="12345",
+            body="<p>Inline note</p>",
+            text_selection="exact phrase",
+            text_selection_match_index=1,
+            text_selection_match_count=3,
+        )
+
+    def test_add_inline_comment_reply_oauth(self, comments_mixin):
+        """Reply on inline thread uses parent_comment_id only."""
+        comments_mixin.config.auth_type = "oauth"
+        comments_mixin.config.url = "https://test.atlassian.net/wiki"
+
+        mock_adapter = MagicMock()
+        mock_adapter.create_inline_comment.return_value = {
+            "id": "888999000",
+            "type": "comment",
+            "status": "current",
+            "parentCommentId": "777888999",
+            "body": {
+                "view": {
+                    "value": "<p>Reply</p>",
+                    "representation": "view",
+                },
+            },
+            "extensions": {"location": "inline"},
+            "version": {"number": 1},
+            "_links": {},
+        }
+
+        with patch.object(
+            type(comments_mixin),
+            "_v2_adapter",
+            new_callable=lambda: property(lambda self: mock_adapter),
+        ):
+            comments_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
+                "<p>Reply</p>"
+            )
+            comments_mixin.preprocessor.process_html_content.return_value = (
+                "<p>Reply</p>",
+                "Reply",
+            )
+
+            result = comments_mixin.add_inline_comment(
+                "Reply",
+                parent_comment_id="777888999",
+            )
+
+        assert result is not None
+        mock_adapter.create_inline_comment.assert_called_once_with(
+            parent_comment_id="777888999",
+            body="<p>Reply</p>",
+        )
+
+
 class TestConfluenceCommentModel:
     """Tests for ConfluenceComment model parent_comment_id and location fields."""
 

@@ -285,3 +285,111 @@ class TestConfluenceV2AdapterComments:
         assert payload["pageId"] == "12345"
         assert "parentCommentId" not in payload
         assert result["id"] == "333444555"
+
+    def test_create_inline_comment_both_params_raises(self, v2_adapter):
+        """page_id and parent_comment_id together raise ValueError."""
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            v2_adapter.create_inline_comment(
+                page_id="12345",
+                parent_comment_id="67890",
+                body="<p>x</p>",
+                text_selection="x",
+            )
+
+    def test_create_inline_comment_neither_param_raises(self, v2_adapter):
+        """Omitting page_id and parent_comment_id raises ValueError."""
+        with pytest.raises(ValueError, match="Either"):
+            v2_adapter.create_inline_comment(body="<p>x</p>", text_selection="x")
+
+    def test_create_inline_comment_empty_selection_raises(self, v2_adapter):
+        """Top-level inline comment requires non-empty text_selection."""
+        with pytest.raises(ValueError, match="text_selection"):
+            v2_adapter.create_inline_comment(
+                page_id="12345",
+                body="<p>x</p>",
+                text_selection="",
+            )
+
+    def test_create_inline_comment_bad_match_raises(self, v2_adapter):
+        """match_count must be greater than match_index."""
+        with pytest.raises(ValueError, match="text_selection_match_count"):
+            v2_adapter.create_inline_comment(
+                page_id="12345",
+                body="<p>x</p>",
+                text_selection="hello",
+                text_selection_match_index=2,
+                text_selection_match_count=2,
+            )
+
+    def test_create_inline_comment_top_level(self, v2_adapter, mock_session):
+        """POST /api/v2/inline-comments with pageId and inlineCommentProperties."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "444555666",
+            "status": "current",
+            "title": "Inline",
+            "pageId": "12345",
+            "body": {
+                "storage": {
+                    "value": "<p>Note</p>",
+                    "representation": "storage",
+                },
+            },
+            "version": {"number": 1},
+            "_links": {},
+        }
+        mock_session.post.return_value = mock_response
+
+        result = v2_adapter.create_inline_comment(
+            page_id="12345",
+            body="<p>Note</p>",
+            text_selection="Risk",
+            text_selection_match_index=0,
+            text_selection_match_count=1,
+        )
+
+        mock_session.post.assert_called_once()
+        call_args = mock_session.post.call_args
+        assert call_args[0][0] == (
+            "https://example.atlassian.net/wiki/api/v2/inline-comments"
+        )
+        payload = call_args[1]["json"]
+        assert payload["pageId"] == "12345"
+        assert payload["inlineCommentProperties"] == {
+            "textSelection": "Risk",
+            "textSelectionMatchIndex": 0,
+            "textSelectionMatchCount": 1,
+        }
+        assert result["extensions"]["location"] == "inline"
+
+    def test_create_inline_comment_reply(self, v2_adapter, mock_session):
+        """Reply uses parentCommentId only on inline-comments endpoint."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "555666777",
+            "status": "current",
+            "parentCommentId": "444555666",
+            "pageId": "12345",
+            "body": {
+                "storage": {
+                    "value": "<p>Reply</p>",
+                    "representation": "storage",
+                },
+            },
+            "version": {"number": 1},
+            "_links": {},
+        }
+        mock_session.post.return_value = mock_response
+
+        result = v2_adapter.create_inline_comment(
+            parent_comment_id="444555666",
+            body="<p>Reply</p>",
+        )
+
+        payload = mock_session.post.call_args[1]["json"]
+        assert payload["parentCommentId"] == "444555666"
+        assert "pageId" not in payload
+        assert "inlineCommentProperties" not in payload
+        assert result["extensions"]["location"] == "inline"

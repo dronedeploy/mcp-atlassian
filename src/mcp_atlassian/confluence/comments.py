@@ -206,6 +206,90 @@ class CommentsMixin(ConfluenceClient):
             logger.debug("Full exception details for comment reply:", exc_info=True)
             return None
 
+    def add_inline_comment(
+        self,
+        content: str,
+        *,
+        page_id: str | None = None,
+        parent_comment_id: str | None = None,
+        text_selection: str | None = None,
+        text_selection_match_index: int = 0,
+        text_selection_match_count: int = 1,
+    ) -> ConfluenceComment | None:
+        """
+        Add an inline comment on a page, or reply on an inline comment thread.
+
+        Requires Confluence Cloud with OAuth (v2 REST). There is no Server/DC/v1
+        fallback for inline comments.
+
+        For a **new** highlight: pass ``page_id``, ``text_selection`` (exact text
+        on the page), and ``content``. Use ``text_selection_match_index`` and
+        ``text_selection_match_count`` when the phrase appears more than once.
+
+        For a **reply** on an inline thread: pass ``parent_comment_id`` and
+        ``content`` only.
+
+        Args:
+            content: Comment body (markdown or storage HTML)
+            page_id: Page ID (new inline comment)
+            parent_comment_id: Parent comment ID (reply on inline thread)
+            text_selection: Exact substring to highlight (required with page_id)
+            text_selection_match_index: Zero-based occurrence to highlight
+            text_selection_match_count: Total occurrences of text_selection
+
+        Returns:
+            ConfluenceComment if successful, None otherwise
+        """
+        v2_adapter = self._v2_adapter
+        if not v2_adapter:
+            logger.error(
+                "Inline comments require Confluence Cloud OAuth (v2 API); "
+                "current auth does not support inline comments"
+            )
+            return None
+
+        try:
+            if not content.strip().startswith("<"):
+                content = self.preprocessor.markdown_to_confluence_storage(content)
+
+            if parent_comment_id:
+                response = v2_adapter.create_inline_comment(
+                    parent_comment_id=parent_comment_id,
+                    body=content,
+                )
+                space_key = ""
+            else:
+                if not page_id:
+                    logger.error("add_inline_comment: page_id required without parent")
+                    return None
+                response = v2_adapter.create_inline_comment(
+                    page_id=page_id,
+                    body=content,
+                    text_selection=text_selection or "",
+                    text_selection_match_index=text_selection_match_index,
+                    text_selection_match_count=text_selection_match_count,
+                )
+                space_key = ""
+
+            if not response:
+                logger.error("Failed to add inline comment: empty response")
+                return None
+
+            return self._process_comment_response(response, space_key)
+
+        except requests.RequestException as e:
+            logger.error(f"Network error when adding inline comment: {str(e)}")
+            return None
+        except (ValueError, TypeError, KeyError) as e:
+            logger.error(f"Error processing inline comment: {str(e)}")
+            return None
+        except Exception as e:  # noqa: BLE001 - Intentional fallback with full logging
+            logger.error(f"Unexpected error adding inline comment: {str(e)}")
+            logger.debug(
+                "Full exception details for inline comment:", exc_info=True
+            )
+            return None
+
     def _process_comment_response(
         self, response: dict[str, Any], space_key: str
     ) -> ConfluenceComment:

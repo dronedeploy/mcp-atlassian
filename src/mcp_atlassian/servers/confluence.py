@@ -932,7 +932,10 @@ async def reply_to_comment(
     ],
     body: Annotated[str, Field(description="The reply content in Markdown format")],
 ) -> str:
-    """Reply to an existing comment thread on a Confluence page.
+    """Reply to an existing **footer** comment thread on a Confluence page.
+
+    For replies on an **inline** comment thread (Cloud OAuth), use
+    ``confluence_add_inline_comment`` with ``parent_comment_id`` instead.
 
     Args:
         ctx: The FastMCP context.
@@ -968,6 +971,146 @@ async def reply_to_comment(
             "success": False,
             "message": f"Error replying to comment {comment_id}",
             "error": str(e),
+        }
+
+    return json.dumps(response, indent=2, ensure_ascii=False)
+
+
+@confluence_mcp.tool(
+    tags={"confluence", "write", "toolset:confluence_comments"},
+    annotations={"title": "Add Inline Comment", "destructiveHint": True},
+)
+@check_write_access
+async def add_inline_comment(
+    ctx: Context,
+    body: Annotated[
+        str,
+        Field(description="Comment content in Markdown format"),
+    ],
+    page_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Page ID for a new inline comment. Omit when replying "
+                "(use parent_comment_id instead)."
+            ),
+            default=None,
+        ),
+    ] = None,
+    parent_comment_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Parent comment ID to reply on an inline thread. When set, "
+                "page_id and text selection fields are ignored."
+            ),
+            default=None,
+        ),
+    ] = None,
+    text_selection: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Exact text from the page body to highlight (required for a "
+                "new inline comment; must match rendered page text)."
+            ),
+            default=None,
+        ),
+    ] = None,
+    text_selection_match_index: Annotated[
+        int,
+        Field(
+            description=(
+                "Zero-based index when text_selection appears multiple times "
+                "(default 0)."
+            ),
+            default=0,
+            ge=0,
+        ),
+    ] = 0,
+    text_selection_match_count: Annotated[
+        int,
+        Field(
+            description=(
+                "How many times text_selection appears on the page; must be "
+                "greater than text_selection_match_index (default 1)."
+            ),
+            default=1,
+            ge=1,
+        ),
+    ] = 1,
+) -> str:
+    """Add an inline comment on a Confluence page (Cloud OAuth / v2 API only).
+
+    Highlights a chosen substring on the page and attaches the comment to it,
+    or posts a reply on an existing inline thread.
+
+    Args:
+        ctx: The FastMCP context.
+        body: Comment content in Markdown.
+        page_id: Target page for a new inline comment.
+        parent_comment_id: For replies on an inline thread only.
+        text_selection: Exact page text to highlight (new comments only).
+        text_selection_match_index: Which occurrence to highlight if duplicated.
+        text_selection_match_count: Total occurrences of text_selection on the page.
+
+    Returns:
+        JSON string with success flag and comment payload or error details.
+    """
+    confluence_fetcher = await get_confluence_fetcher(ctx)
+    try:
+        if parent_comment_id:
+            comment = confluence_fetcher.add_inline_comment(
+                body,
+                parent_comment_id=parent_comment_id,
+            )
+        else:
+            if not page_id or not (text_selection and text_selection.strip()):
+                return json.dumps(
+                    {
+                        "success": False,
+                        "message": (
+                            "For a new inline comment, page_id and non-empty "
+                            "text_selection are required. For a reply, pass "
+                            "parent_comment_id instead."
+                        ),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            comment = confluence_fetcher.add_inline_comment(
+                body,
+                page_id=page_id,
+                text_selection=text_selection,
+                text_selection_match_index=text_selection_match_index,
+                text_selection_match_count=text_selection_match_count,
+            )
+    except Exception as e:
+        logger.error(f"Error adding inline comment: {str(e)}")
+        return json.dumps(
+            {
+                "success": False,
+                "message": "Error adding inline comment",
+                "error": str(e),
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    if comment:
+        comment_data = comment.to_simplified_dict()
+        response = {
+            "success": True,
+            "message": "Inline comment added successfully",
+            "comment": comment_data,
+        }
+    else:
+        response = {
+            "success": False,
+            "message": (
+                "Unable to add inline comment. Requires Confluence Cloud OAuth, "
+                "or the API returned no comment."
+            ),
         }
 
     return json.dumps(response, indent=2, ensure_ascii=False)
