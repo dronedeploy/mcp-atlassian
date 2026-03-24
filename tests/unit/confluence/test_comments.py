@@ -1,10 +1,11 @@
 """Unit tests for the CommentsMixin class."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 import requests
 
+from mcp_atlassian.confluence.client import ConfluenceClient
 from mcp_atlassian.confluence.comments import CommentsMixin
 from mcp_atlassian.models.confluence import ConfluenceComment
 from tests.fixtures.confluence_mocks import (
@@ -429,9 +430,10 @@ class TestAddCommentV2Routing:
 class TestAddInlineComment:
     """Tests for add_inline_comment (v2 inline-comments API)."""
 
-    def test_add_inline_comment_requires_v2(self, comments_mixin):
-        """Without OAuth Cloud, add_inline_comment returns None."""
+    def test_add_inline_comment_server_dc_returns_none(self, comments_mixin):
+        """Server/Data Center has no v2 adapter; inline comments are Cloud-only."""
         comments_mixin.config.auth_type = "basic"
+        comments_mixin.config.url = "https://confluence.example.com/wiki"
 
         result = comments_mixin.add_inline_comment(
             "Note",
@@ -463,9 +465,10 @@ class TestAddInlineComment:
         }
 
         with patch.object(
-            type(comments_mixin),
-            "_v2_adapter",
-            new_callable=lambda: property(lambda self: mock_adapter),
+            ConfluenceClient,
+            "_v2_inline_comment_adapter",
+            new_callable=PropertyMock,
+            return_value=mock_adapter,
         ):
             comments_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
                 "<p>Inline note</p>"
@@ -515,9 +518,10 @@ class TestAddInlineComment:
         }
 
         with patch.object(
-            type(comments_mixin),
-            "_v2_adapter",
-            new_callable=lambda: property(lambda self: mock_adapter),
+            ConfluenceClient,
+            "_v2_inline_comment_adapter",
+            new_callable=PropertyMock,
+            return_value=mock_adapter,
         ):
             comments_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
                 "<p>Reply</p>"
@@ -537,6 +541,49 @@ class TestAddInlineComment:
             parent_comment_id="777888999",
             body="<p>Reply</p>",
         )
+
+    def test_add_inline_comment_cloud_basic_uses_inline_adapter(self, comments_mixin):
+        """Cloud PAT/basic uses _v2_inline_comment_adapter (not OAuth-only _v2_adapter)."""
+        comments_mixin.config.auth_type = "basic"
+        comments_mixin.config.url = "https://test.atlassian.net/wiki"
+
+        mock_adapter = MagicMock()
+        mock_adapter.create_inline_comment.return_value = {
+            "id": "111",
+            "type": "comment",
+            "status": "current",
+            "body": {
+                "view": {
+                    "value": "<p>N</p>",
+                    "representation": "view",
+                },
+            },
+            "extensions": {"location": "inline"},
+            "version": {"number": 1},
+            "_links": {},
+        }
+
+        with patch.object(
+            ConfluenceClient,
+            "_v2_inline_comment_adapter",
+            new_callable=PropertyMock,
+            return_value=mock_adapter,
+        ):
+            comments_mixin.preprocessor.markdown_to_confluence_storage.return_value = (
+                "<p>N</p>"
+            )
+            comments_mixin.preprocessor.process_html_content.return_value = (
+                "<p>N</p>",
+                "N",
+            )
+            result = comments_mixin.add_inline_comment(
+                "N",
+                page_id="99",
+                text_selection="hi",
+            )
+
+        assert result is not None
+        mock_adapter.create_inline_comment.assert_called_once()
 
 
 class TestConfluenceCommentModel:

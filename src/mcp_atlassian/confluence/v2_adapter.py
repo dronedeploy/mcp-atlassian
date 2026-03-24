@@ -1,8 +1,9 @@
-"""Confluence REST API v2 adapter for OAuth authentication.
+"""Confluence REST API v2 adapter for Confluence Cloud.
 
-This module provides direct v2 API calls to handle the deprecated v1 endpoints
-when using OAuth authentication. The v1 endpoints have been removed for OAuth
-but still work for API token authentication.
+Direct v2 HTTP calls using the same authenticated ``requests.Session`` as the
+v1 client. Needed where Cloud requires v2 (e.g. some OAuth paths, inline
+comments) and used for Cloud **OAuth**, **PAT**, or **basic** (email + API
+token) when ``is_cloud`` is true.
 """
 
 import logging
@@ -17,14 +18,14 @@ logger = logging.getLogger("mcp-atlassian")
 
 
 class ConfluenceV2Adapter:
-    """Adapter for Confluence REST API v2 operations when using OAuth."""
+    """Adapter for Confluence REST API v2 operations on Cloud."""
 
     def __init__(self, session: requests.Session, base_url: str) -> None:
         """Initialize the v2 adapter.
 
         Args:
-            session: Authenticated requests session (OAuth configured)
-            base_url: Base URL for the Confluence instance
+            session: Authenticated session (OAuth, PAT, or basic for Cloud)
+            base_url: Confluence base URL (site wiki URL or Cloud API base)
         """
         self.session = session
         self.base_url = base_url

@@ -21,11 +21,7 @@ class AttachmentsMixin(ConfluenceClient, AttachmentsOperationsProto):
 
     @property
     def _v2_adapter(self) -> ConfluenceV2Adapter | None:
-        """Get v2 API adapter for OAuth authentication.
-
-        Returns:
-            ConfluenceV2Adapter instance if OAuth is configured, None otherwise
-        """
+        """Get v2 API adapter for OAuth Cloud."""
         if self.config.auth_type == "oauth" and self.config.is_cloud:
             return ConfluenceV2Adapter(
                 session=self.confluence._session, base_url=self.confluence.url

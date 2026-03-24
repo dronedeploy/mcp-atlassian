@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from mcp_atlassian.confluence import ConfluenceFetcher
 from mcp_atlassian.confluence.client import ConfluenceClient
 from mcp_atlassian.confluence.config import ConfluenceConfig
+from mcp_atlassian.confluence.v2_adapter import ConfluenceV2Adapter
 
 
 def test_init_with_basic_auth():
@@ -459,3 +460,46 @@ def test_confluence_fetcher_mro_order():
     # Verify that attachment methods are accessible (the real test)
     assert hasattr(ConfluenceFetcher, "upload_attachment")
     assert hasattr(ConfluenceFetcher, "get_content_attachments")
+
+
+def test_v2_inline_comment_adapter_cloud_basic_auth():
+    """Cloud + basic auth exposes v2 session adapter for inline comments only."""
+    config = ConfluenceConfig(
+        url="https://test.atlassian.net/wiki",
+        auth_type="basic",
+        username="u@example.com",
+        api_token="tok",
+    )
+    with (
+        patch("mcp_atlassian.confluence.client.Confluence") as mock_confluence,
+        patch(
+            "mcp_atlassian.preprocessing.confluence.ConfluencePreprocessor"
+        ),
+        patch("mcp_atlassian.confluence.client.configure_ssl_verification"),
+    ):
+        mock_confluence.return_value.url = config.url
+        client = ConfluenceClient(config=config)
+        adapter = client._v2_inline_comment_adapter
+        assert adapter is not None
+        assert isinstance(adapter, ConfluenceV2Adapter)
+        assert adapter.session is mock_confluence.return_value._session
+        assert adapter.base_url == config.url
+
+
+def test_v2_inline_comment_adapter_server_dc_is_none():
+    """Non-Cloud URL should not construct inline-comment v2 adapter."""
+    config = ConfluenceConfig(
+        url="https://confluence.example.com/wiki",
+        auth_type="basic",
+        username="u",
+        api_token="tok",
+    )
+    with (
+        patch("mcp_atlassian.confluence.client.Confluence") as mock_confluence,
+        patch(
+            "mcp_atlassian.preprocessing.confluence.ConfluencePreprocessor"
+        ),
+        patch("mcp_atlassian.confluence.client.configure_ssl_verification"),
+    ):
+        client = ConfluenceClient(config=config)
+        assert client._v2_inline_comment_adapter is None

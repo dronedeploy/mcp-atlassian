@@ -12,6 +12,7 @@ from ..utils.logging import get_masked_session_headers, log_config_param, mask_s
 from ..utils.oauth import configure_oauth_session
 from ..utils.ssl import configure_ssl_verification
 from .config import ConfluenceConfig
+from .v2_adapter import ConfluenceV2Adapter
 
 # Configure logging
 logger = logging.getLogger("mcp-atlassian")
@@ -159,6 +160,23 @@ class ConfluenceClient:
                     "Authentication validation failed during client initialization - "
                     "continuing anyway"
                 )
+
+    @property
+    def _v2_inline_comment_adapter(self) -> ConfluenceV2Adapter | None:
+        """v2 session for inline comments on Cloud (OAuth, PAT, or basic auth).
+
+        Inline comments require ``POST /api/v2/inline-comments``. Other v2 page
+        paths stay OAuth-only via mixins' ``_v2_adapter`` so PAT/basic keep
+        using stable v1 page APIs elsewhere.
+        """
+        if not self.config.is_cloud:
+            return None
+        if self.config.auth_type not in ("oauth", "pat", "basic"):
+            return None
+        return ConfluenceV2Adapter(
+            session=self.confluence._session,
+            base_url=self.confluence.url,
+        )
 
     def _validate_authentication(self) -> None:
         """Validate authentication by making a simple API call."""

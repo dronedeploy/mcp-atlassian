@@ -17,11 +17,7 @@ class CommentsMixin(ConfluenceClient):
 
     @property
     def _v2_adapter(self) -> ConfluenceV2Adapter | None:
-        """Get v2 API adapter for OAuth authentication.
-
-        Returns:
-            ConfluenceV2Adapter instance if OAuth is configured, None otherwise
-        """
+        """v2 adapter for footer comments when using OAuth Cloud."""
         if self.config.auth_type == "oauth" and self.config.is_cloud:
             return ConfluenceV2Adapter(
                 session=self.confluence._session, base_url=self.confluence.url
@@ -219,8 +215,8 @@ class CommentsMixin(ConfluenceClient):
         """
         Add an inline comment on a page, or reply on an inline comment thread.
 
-        Requires Confluence Cloud with OAuth (v2 REST). There is no Server/DC/v1
-        fallback for inline comments.
+        Requires **Confluence Cloud** (v2 REST) with OAuth, PAT, or basic auth.
+        There is no Server/DC or v1 fallback for inline comments.
 
         For a **new** highlight: pass ``page_id``, ``text_selection`` (exact text
         on the page), and ``content``. Use ``text_selection_match_index`` and
@@ -240,11 +236,11 @@ class CommentsMixin(ConfluenceClient):
         Returns:
             ConfluenceComment if successful, None otherwise
         """
-        v2_adapter = self._v2_adapter
-        if not v2_adapter:
+        inline_adapter = self._v2_inline_comment_adapter
+        if not inline_adapter:
             logger.error(
-                "Inline comments require Confluence Cloud OAuth (v2 API); "
-                "current auth does not support inline comments"
+                "Inline comments require Confluence Cloud (v2 API); "
+                "Server/Data Center or unsupported auth."
             )
             return None
 
@@ -253,7 +249,7 @@ class CommentsMixin(ConfluenceClient):
                 content = self.preprocessor.markdown_to_confluence_storage(content)
 
             if parent_comment_id:
-                response = v2_adapter.create_inline_comment(
+                response = inline_adapter.create_inline_comment(
                     parent_comment_id=parent_comment_id,
                     body=content,
                 )
@@ -262,7 +258,7 @@ class CommentsMixin(ConfluenceClient):
                 if not page_id:
                     logger.error("add_inline_comment: page_id required without parent")
                     return None
-                response = v2_adapter.create_inline_comment(
+                response = inline_adapter.create_inline_comment(
                     page_id=page_id,
                     body=content,
                     text_selection=text_selection or "",

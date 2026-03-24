@@ -934,7 +934,7 @@ async def reply_to_comment(
 ) -> str:
     """Reply to an existing **footer** comment thread on a Confluence page.
 
-    For replies on an **inline** comment thread (Cloud OAuth), use
+    For replies on an **inline** comment thread (Confluence Cloud v2), use
     ``confluence_add_inline_comment`` with ``parent_comment_id`` instead.
 
     Args:
@@ -1040,7 +1040,7 @@ async def add_inline_comment(
         ),
     ] = 1,
 ) -> str:
-    """Add an inline comment on a Confluence page (Cloud OAuth / v2 API only).
+    """Add an inline comment on a Confluence page (Cloud v2 API; OAuth, PAT, or basic).
 
     Highlights a chosen substring on the page and attaches the comment to it,
     or posts a reply on an existing inline thread.
@@ -1108,7 +1108,7 @@ async def add_inline_comment(
         response = {
             "success": False,
             "message": (
-                "Unable to add inline comment. Requires Confluence Cloud OAuth, "
+                "Unable to add inline comment. Requires Confluence Cloud (v2), "
                 "or the API returned no comment."
             ),
         }
