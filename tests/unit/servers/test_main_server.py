@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from mcp_atlassian import __version__ as mcp_atlassian_version
 from mcp_atlassian.servers.main import (
     UserTokenMiddleware,
     _get_server_version_payload,
@@ -18,23 +19,91 @@ from mcp_atlassian.servers.main import (
 @pytest.mark.anyio
 async def test_get_server_version_without_revision():
     """When MCP_ATLASSIAN_BUILD_REVISION is not set, payload has no revision key."""
-    with patch.dict(os.environ, {}, clear=False):
-        if "MCP_ATLASSIAN_BUILD_REVISION" in os.environ:
-            del os.environ["MCP_ATLASSIAN_BUILD_REVISION"]
+    env_remove = {}
+    for key in (
+        "MCP_ATLASSIAN_BUILD_REVISION",
+        "MCP_ATLASSIAN_RUNTIME",
+    ):
+        if key in os.environ:
+            env_remove[key] = os.environ.pop(key)
+    try:
         payload = _get_server_version_payload()
+    finally:
+        os.environ.update(env_remove)
     assert payload["name"] == "mcp-atlassian"
     assert "version" in payload
     assert "revision" not in payload
+    assert "runtime" not in payload
 
 
 @pytest.mark.anyio
 async def test_get_server_version_with_revision():
-    """When MCP_ATLASSIAN_BUILD_REVISION is set (e.g. Docker build), version includes revision."""
-    with patch.dict(os.environ, {"MCP_ATLASSIAN_BUILD_REVISION": "a87e98b"}, clear=False):
+    """BUILD_REVISION set: version string includes +revision when base has no local segment."""
+    with (
+        patch.dict(
+            os.environ,
+            {"MCP_ATLASSIAN_BUILD_REVISION": "a87e98b"},
+            clear=False,
+        ),
+        patch("mcp_atlassian.servers.main.mcp_atlassian_version", "0.21.0"),
+    ):
         payload = _get_server_version_payload()
     assert payload["name"] == "mcp-atlassian"
-    assert payload["version"].endswith("+a87e98b")
+    assert payload["version"] == "0.21.0+a87e98b"
     assert payload["revision"] == "a87e98b"
+
+
+@pytest.mark.anyio
+async def test_get_server_version_unknown_revision_ignored():
+    """Revision value 'unknown' is ignored (Docker ARG default)."""
+    with patch.dict(
+        os.environ,
+        {"MCP_ATLASSIAN_BUILD_REVISION": "unknown"},
+        clear=False,
+    ):
+        payload = _get_server_version_payload()
+    assert payload["name"] == "mcp-atlassian"
+    assert "revision" not in payload
+    assert payload["version"] == mcp_atlassian_version
+
+
+@pytest.mark.anyio
+async def test_get_server_version_includes_runtime():
+    """MCP_ATLASSIAN_RUNTIME is surfaced when set (e.g. local_uv from wrapper)."""
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "MCP_ATLASSIAN_BUILD_REVISION": "abc1234",
+                "MCP_ATLASSIAN_RUNTIME": "local_uv",
+            },
+            clear=False,
+        ),
+        patch("mcp_atlassian.servers.main.mcp_atlassian_version", "0.21.0"),
+    ):
+        payload = _get_server_version_payload()
+    assert payload["runtime"] == "local_uv"
+    assert payload["revision"] == "abc1234"
+    assert payload["version"] == "0.21.0+abc1234"
+
+
+@pytest.mark.anyio
+async def test_get_server_version_revision_separate_when_base_has_local_segment():
+    """If package version already has a local +segment, do not append another +revision."""
+    with (
+        patch.dict(
+            os.environ,
+            {"MCP_ATLASSIAN_BUILD_REVISION": "deadbeef"},
+            clear=False,
+        ),
+        patch(
+            "mcp_atlassian.servers.main.mcp_atlassian_version",
+            "0.21.1.dev24+0566ff1",
+        ),
+    ):
+        payload = _get_server_version_payload()
+    assert payload["version"] == "0.21.1.dev24+0566ff1"
+    assert payload["revision"] == "deadbeef"
 
 
 @pytest.mark.anyio

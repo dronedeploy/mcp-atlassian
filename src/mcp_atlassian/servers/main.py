@@ -825,15 +825,30 @@ main_mcp.mount(confluence_mcp, "confluence")
 
 
 def _get_server_version_payload() -> dict[str, str]:
-    """Build the server version payload. Uses MCP_ATLASSIAN_BUILD_REVISION when set (e.g. Docker build)."""
+    """Build the server version payload for ``get_server_version``.
+
+    - ``version``: Installed package version; if ``MCP_ATLASSIAN_BUILD_REVISION`` is
+      set and the package version has no ``+`` local segment yet, append
+      ``+{revision}``. Otherwise keep package version as-is and rely on the
+      ``revision`` field (avoids double ``+`` with uv-dynamic-versioning).
+    - ``revision``: Git/build short hash when known (omitted otherwise).
+    - ``runtime``: Optional hint, e.g. ``local_uv`` from ``MCP_ATLASSIAN_RUNTIME``.
+    """
     revision = (os.environ.get("MCP_ATLASSIAN_BUILD_REVISION") or "").strip()
-    if revision and revision != "unknown":
-        return {
-            "name": "mcp-atlassian",
-            "version": f"{mcp_atlassian_version}+{revision}",
-            "revision": revision,
-        }
-    return {"name": "mcp-atlassian", "version": mcp_atlassian_version}
+    if revision.lower() == "unknown":
+        revision = ""
+    runtime = (os.environ.get("MCP_ATLASSIAN_RUNTIME") or "").strip()
+
+    payload: dict[str, str] = {"name": "mcp-atlassian"}
+    if runtime:
+        payload["runtime"] = runtime
+    payload["version"] = mcp_atlassian_version
+    if revision:
+        payload["revision"] = revision
+        # Avoid a second '+' when uv-dynamic-versioning already set a local segment.
+        if "+" not in mcp_atlassian_version:
+            payload["version"] = f"{mcp_atlassian_version}+{revision}"
+    return payload
 
 
 @main_mcp.tool(
@@ -841,7 +856,7 @@ def _get_server_version_payload() -> dict[str, str]:
     annotations={"title": "Get Server Version", "readOnlyHint": True},
 )
 async def get_server_version() -> str:
-    """Return the mcp-atlassian server version. Use this to confirm the running image or build after updates."""
+    """Return JSON: name, version, optional revision and runtime (see _get_server_version_payload)."""
     return json.dumps(_get_server_version_payload(), indent=2)
 
 
