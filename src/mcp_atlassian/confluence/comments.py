@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 import requests
+from requests import HTTPError
 
 from ..models.confluence import ConfluenceComment
 from .client import ConfluenceClient
@@ -238,11 +239,14 @@ class CommentsMixin(ConfluenceClient):
         """
         inline_adapter = self._v2_inline_comment_adapter
         if not inline_adapter:
-            logger.error(
-                "Inline comments require Confluence Cloud (v2 API); "
-                "Server/Data Center or unsupported auth."
+            msg = (
+                "Inline comments require Confluence Cloud with the v2 inline-comments "
+                "API (API token, OAuth, or PAT). Data Center is unsupported. "
+                "If you run mcp-atlassian from Docker, rebuild the image so it "
+                "includes _v2_inline_comment_adapter for basic auth."
             )
-            return None
+            logger.error(msg)
+            raise ValueError(msg)
 
         try:
             if not content.strip().startswith("<"):
@@ -257,7 +261,10 @@ class CommentsMixin(ConfluenceClient):
             else:
                 if not page_id:
                     logger.error("add_inline_comment: page_id required without parent")
-                    return None
+                    raise ValueError(
+                        "page_id is required for a new inline comment "
+                        "(or pass parent_comment_id for a reply)."
+                    )
                 response = inline_adapter.create_inline_comment(
                     page_id=page_id,
                     body=content,
@@ -269,22 +276,49 @@ class CommentsMixin(ConfluenceClient):
 
             if not response:
                 logger.error("Failed to add inline comment: empty response")
-                return None
+                raise ValueError(
+                    "Confluence returned an empty response for inline comment creation."
+                )
 
-            return self._process_comment_response(response, space_key)
+            try:
+                return self._process_comment_response(response, space_key)
+            except (TypeError, KeyError) as e:
+                logger.error(f"Error parsing inline comment response: {str(e)}")
+                parse_err = f"Could not parse Confluence inline comment response: {e}"
+                raise ValueError(parse_err) from e
 
+        except HTTPError as e:
+            snippet = ""
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if e.response is not None and e.response.text:
+                snippet = e.response.text.strip()[:2000]
+            logger.error(
+                "HTTP error when adding inline comment: %s — %s",
+                status,
+                snippet[:500] if snippet else "(no body)",
+            )
+            http_msg = (
+                "Confluence inline comment API request failed "
+                f"(HTTP {status}). "
+                "Common causes: text_selection does not match page text exactly "
+                "(copy from the editor or storage export), wrong match_index/count, "
+                "or insufficient Confluence permissions. "
+                f"Response: {snippet}"
+            )
+            raise ValueError(http_msg) from e
         except requests.RequestException as e:
             logger.error(f"Network error when adding inline comment: {str(e)}")
-            return None
-        except (ValueError, TypeError, KeyError) as e:
-            logger.error(f"Error processing inline comment: {str(e)}")
-            return None
+            net_msg = f"Network error when calling Confluence inline comment API: {e}"
+            raise ValueError(net_msg) from e
+        except ValueError:
+            raise
         except Exception as e:  # noqa: BLE001 - Intentional fallback with full logging
             logger.error(f"Unexpected error adding inline comment: {str(e)}")
             logger.debug(
                 "Full exception details for inline comment:", exc_info=True
             )
-            return None
+            unexpected_msg = f"Unexpected error adding inline comment: {e}"
+            raise ValueError(unexpected_msg) from e
 
     def _process_comment_response(
         self, response: dict[str, Any], space_key: str

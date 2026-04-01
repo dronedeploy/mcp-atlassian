@@ -430,18 +430,17 @@ class TestAddCommentV2Routing:
 class TestAddInlineComment:
     """Tests for add_inline_comment (v2 inline-comments API)."""
 
-    def test_add_inline_comment_server_dc_returns_none(self, comments_mixin):
+    def test_add_inline_comment_server_dc_raises(self, comments_mixin):
         """Server/Data Center has no v2 adapter; inline comments are Cloud-only."""
         comments_mixin.config.auth_type = "basic"
         comments_mixin.config.url = "https://confluence.example.com/wiki"
 
-        result = comments_mixin.add_inline_comment(
-            "Note",
-            page_id="12345",
-            text_selection="hello",
-        )
-
-        assert result is None
+        with pytest.raises(ValueError, match="Inline comments require Confluence Cloud"):
+            comments_mixin.add_inline_comment(
+                "Note",
+                page_id="12345",
+                text_selection="hello",
+            )
 
     def test_add_inline_comment_top_level_oauth(self, comments_mixin):
         """Top-level inline routes through create_inline_comment on v2 adapter."""
