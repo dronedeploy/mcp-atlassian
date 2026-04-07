@@ -271,13 +271,15 @@ def run_oauth_flow(args: argparse.Namespace) -> bool:
         if oauth_config.cloud_id:
             logger.info(f"Retrieved Cloud ID: {oauth_config.cloud_id}")
             logger.info(
-                "\n💡 Tip: Add/update the following in your .env file or environment variables:"
+                "\n💡 Tip: Add/update your .env (or environment). "
+                "Client ID and Client Secret are not logged; copy them from your "
+                "Atlassian OAuth 2.0 app in the developer console."
             )
-            logger.info(f"ATLASSIAN_OAUTH_CLIENT_ID={oauth_config.client_id}")
-            logger.info(f"ATLASSIAN_OAUTH_CLIENT_SECRET={oauth_config.client_secret}")
-            logger.info(f"ATLASSIAN_OAUTH_REDIRECT_URI={oauth_config.redirect_uri}")
-            logger.info(f"ATLASSIAN_OAUTH_SCOPE={oauth_config.scope}")
-            logger.info(f"ATLASSIAN_OAUTH_CLOUD_ID={oauth_config.cloud_id}")
+            logger.info("  ATLASSIAN_OAUTH_CLIENT_ID=<from Atlassian developer console>")
+            logger.info("  ATLASSIAN_OAUTH_CLIENT_SECRET=<from Atlassian developer console>")
+            logger.info(f"  ATLASSIAN_OAUTH_REDIRECT_URI={oauth_config.redirect_uri}")
+            logger.info(f"  ATLASSIAN_OAUTH_SCOPE={oauth_config.scope}")
+            logger.info(f"  ATLASSIAN_OAUTH_CLOUD_ID={oauth_config.cloud_id}")
         else:
             logger.warning(
                 "Cloud ID could not be obtained. Some API calls might require it."
