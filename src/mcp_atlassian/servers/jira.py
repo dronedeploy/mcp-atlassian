@@ -2647,7 +2647,7 @@ async def get_project_components(
 
 
 @jira_mcp.tool(
-    tags={"jira", "read", "toolset:jira_projects"},
+    tags={"jira", "read", "toolset:jira_projects", "toolset:security_ops"},
     annotations={"title": "Get All Projects", "readOnlyHint": True},
 )
 async def get_all_projects(

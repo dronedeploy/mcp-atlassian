@@ -142,7 +142,7 @@ CONFLUENCE_TOOLSETS: dict[str, ToolsetDefinition] = {
 SECURITY_OPS_TOOLSET: dict[str, ToolsetDefinition] = {
     "security_ops": ToolsetDefinition(
         name="security_ops",
-        description="Curated set for security-ops workflows: JIRA issue/comment/link/transition/field/attachment, Confluence page/search/images/create/move, get_server_version",
+        description="Curated set for security-ops workflows: JIRA issue/comment/link/transition/field/attachment, jira_get_all_projects, Confluence page/search/images/create/move, get_server_version",
         default=False,
     ),
 }
