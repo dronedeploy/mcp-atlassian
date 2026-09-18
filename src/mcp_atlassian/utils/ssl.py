@@ -5,14 +5,19 @@ import ssl
 from typing import Any
 from urllib.parse import urlparse
 
-from requests.adapters import HTTPAdapter
 from requests.sessions import Session
 from urllib3.poolmanager import PoolManager
+
+from .ssrf_adapter import (
+    SsrfPinningAdapter,
+    _PinnedHTTPConnectionPool,
+    _PinnedHTTPSConnectionPool,
+)
 
 logger = logging.getLogger("mcp-atlassian")
 
 
-class SSLIgnoreAdapter(HTTPAdapter):
+class SSLIgnoreAdapter(SsrfPinningAdapter):
     """HTTP adapter that ignores SSL verification.
 
     A custom transport adapter that disables SSL certificate verification for specific domains.
@@ -48,6 +53,15 @@ class SSLIgnoreAdapter(HTTPAdapter):
             ssl_context=context,
             **pool_kwargs,
         )
+        # This adapter mounts at a more specific prefix than the session-wide
+        # SsrfPinningAdapter and would otherwise silently replace it (requests
+        # picks the longest matching mount prefix) — keep the DNS-pinning
+        # connection classes so disabling SSL verification does not also
+        # disable the SSRF rebinding guard.
+        self.poolmanager.pool_classes_by_scheme = {  # type: ignore[attr-defined]
+            "http": _PinnedHTTPConnectionPool,
+            "https": _PinnedHTTPSConnectionPool,
+        }
 
     def cert_verify(self, conn: Any, url: str, verify: bool, cert: Any | None) -> None:
         """Override cert verification to disable SSL verification.

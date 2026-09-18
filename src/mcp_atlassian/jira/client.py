@@ -17,6 +17,7 @@ from mcp_atlassian.utils.logging import (
 )
 from mcp_atlassian.utils.oauth import configure_oauth_session
 from mcp_atlassian.utils.ssl import configure_ssl_verification
+from mcp_atlassian.utils.ssrf_adapter import mount_ssrf_pinning
 from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
 from ..models.jira.adf import markdown_to_adf
@@ -140,6 +141,13 @@ class JiraClient:
         # Block redirects to internal/metadata hosts on every outbound request
         # from this session, not just the per-user HTTP fetcher paths.
         self.jira._session.hooks["response"].append(make_ssrf_redirect_hook())
+
+        # Pin DNS resolution against rebinding: resolve+validate once and connect
+        # to that address, closing the validate-then-reconnect TOCTOU that a plain
+        # redirect check leaves open. Preserves TLS SNI. self.config.url is
+        # trusted since on-prem DC instances legitimately live on private
+        # networks or localhost.
+        mount_ssrf_pinning(self.jira._session, self.config.url)
 
         # Proxy configuration
         proxies = {}

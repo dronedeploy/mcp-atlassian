@@ -11,6 +11,7 @@ from ..exceptions import MCPAtlassianAuthenticationError
 from ..utils.logging import get_masked_session_headers, log_config_param, mask_sensitive
 from ..utils.oauth import configure_oauth_session
 from ..utils.ssl import configure_ssl_verification
+from ..utils.ssrf_adapter import mount_ssrf_pinning
 from ..utils.urls import make_ssrf_redirect_hook
 from .config import ConfluenceConfig
 from .v2_adapter import ConfluenceV2Adapter
@@ -128,6 +129,13 @@ class ConfluenceClient:
         # Block redirects to internal/metadata hosts on every outbound request
         # from this session, not just the per-user HTTP fetcher paths.
         self.confluence._session.hooks["response"].append(make_ssrf_redirect_hook())
+
+        # Pin DNS resolution against rebinding: resolve+validate once and connect
+        # to that address, closing the validate-then-reconnect TOCTOU that a plain
+        # redirect check leaves open. Preserves TLS SNI. self.config.url is
+        # trusted since on-prem DC instances legitimately live on private
+        # networks or localhost.
+        mount_ssrf_pinning(self.confluence._session, self.config.url)
 
         # Proxy configuration
         proxies = {}
