@@ -6,7 +6,8 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastmcp import Context
+from fastmcp import Client, Context
+from fastmcp.client import FastMCPTransport
 from fastmcp.tools import Tool as FastMCPTool
 from mcp.types import Tool as MCPTool
 from starlette.applications import Starlette
@@ -1242,3 +1243,101 @@ class TestMCPProtocolIntegration:
         # Execute tool and verify error handling
         with pytest.raises(MCPAtlassianAuthenticationError):
             await mock_failing_tool(ctx)
+
+
+@pytest.mark.anyio
+class TestCallTimeToolAuthorization:
+    """Regression tests for GHSA-3r68-hf9h-887v.
+
+    _list_tools_mcp filters the tool *listing* by ENABLED_TOOLS, enabled
+    toolsets, and read-only mode. Before this fix, _call_tool_mcp did not
+    re-check any of that, so a client that already knew a tool's name (e.g.
+    from a prior listing before read-only mode was flipped on, or simply by
+    guessing the name) could invoke a tool that would have been hidden from
+    the listing.
+    """
+
+    @staticmethod
+    def _set_request_context(
+        server: AtlassianMCP,
+        *,
+        read_only: bool = False,
+        enabled_tools: list[str] | None = None,
+        enabled_toolsets: set[str] | None = None,
+    ) -> None:
+        app_context = MainAppContext(
+            read_only=read_only,
+            enabled_tools=enabled_tools,
+            enabled_toolsets=enabled_toolsets,
+        )
+        request_context = MagicMock()
+        request_context.lifespan_context = {"app_lifespan_context": app_context}
+        request_context.request = None
+        server._mcp_server = MagicMock()
+        server._mcp_server.request_context = request_context
+
+    async def _make_server(self) -> AtlassianMCP:
+        server = AtlassianMCP(name="Test Atlassian MCP", lifespan=main_lifespan)
+
+        @server.tool(tags={"jira", "read"})
+        async def read_tool() -> str:
+            return "read-ok"
+
+        @server.tool(tags={"jira", "write"})
+        async def write_tool() -> str:
+            return "write-ok"
+
+        return server
+
+    async def test_write_tool_denied_in_read_only_mode(self):
+        """A write tool hidden from the listing by read-only mode cannot be
+        invoked directly by name either."""
+        server = await self._make_server()
+        self._set_request_context(server, read_only=True)
+
+        with pytest.raises(Exception, match="Unknown tool: write_tool"):
+            await server._call_tool_mcp("write_tool", {})
+
+    async def test_read_tool_allowed_in_read_only_mode(self):
+        """A read tool remains callable in read-only mode.
+
+        Goes through a real Client session (rather than calling
+        _call_tool_mcp directly, as the denial tests do) since the allowed
+        path proceeds to FastMCP's normal executor, which expects the full
+        request envelope a raw call doesn't set up.
+        """
+        server = await self._make_server()
+        async with Client(transport=FastMCPTransport(server)) as client:
+            with patch.dict(os.environ, {"READ_ONLY_MODE": "true"}, clear=False):
+                result = await client.call_tool("read_tool", {})
+        assert result.content[0].text == "read-ok"
+
+    async def test_tool_outside_enabled_tools_denied(self):
+        """A tool excluded by ENABLED_TOOLS cannot be invoked directly by name."""
+        denied_server = await self._make_server()
+        self._set_request_context(denied_server, enabled_tools=["read_tool"])
+        with pytest.raises(Exception, match="Unknown tool: write_tool"):
+            await denied_server._call_tool_mcp("write_tool", {})
+
+        # A fresh server for the allowed path: _set_request_context above
+        # replaced denied_server._mcp_server with a bare MagicMock, which
+        # isn't a real session and can't drive a live Client connection.
+        allowed_server = await self._make_server()
+        async with Client(transport=FastMCPTransport(allowed_server)) as client:
+            with patch.dict(
+                os.environ, {"ENABLED_TOOLS": "read_tool"}, clear=False
+            ):
+                result = await client.call_tool("read_tool", {})
+        assert result.content[0].text == "read-ok"
+
+    async def test_unknown_tool_and_denied_tool_raise_identical_error_shape(self):
+        """Denial must not leak that a hidden tool exists: same error message
+        format ("Unknown tool: <name>") as a genuinely unknown tool name, not
+        some other message that would reveal the tool is merely disabled."""
+        server = await self._make_server()
+        self._set_request_context(server, read_only=True)
+
+        with pytest.raises(Exception, match=r"^Unknown tool: write_tool$"):
+            await server._call_tool_mcp("write_tool", {})
+        with pytest.raises(Exception, match=r"^Unknown tool: does_not_exist$"):
+            await server._call_tool_mcp("does_not_exist", {})

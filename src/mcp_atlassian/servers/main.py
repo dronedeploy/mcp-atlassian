@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from cachetools import TTLCache
 from fastmcp import FastMCP
 from fastmcp import settings as fastmcp_settings
+from fastmcp.exceptions import NotFoundError
 from fastmcp.server.event_store import EventStore
 from fastmcp.server.http import StarletteWithLifespan
 from fastmcp.tools import Tool as FastMCPTool
@@ -271,9 +272,16 @@ class AtlassianMCP(FastMCP[MainAppContext]):
         )
 
     @staticmethod
-    def _is_tool_permitted(
+    def _is_tool_authorized(
         registered_name: str, tool_obj: FastMCPTool, ctx: _ToolFilterContext
     ) -> bool:
+        """ENABLED_TOOLS + toolset + read-only boundary.
+
+        Enforced identically at listing time and call time (see
+        ``_call_tool_mcp``), so a client that knows a tool's name cannot
+        invoke a tool that is disabled, out of the enabled-toolsets/tools
+        allowlist, or a write tool while the server is read-only.
+        """
         tool_tags = tool_obj.tags
 
         if not should_include_tool_by_toolset(
@@ -291,6 +299,24 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                 f"Excluding tool '{registered_name}' due to read-only mode and 'write' tag"
             )
             return False
+
+        return True
+
+    @classmethod
+    def _is_tool_permitted(
+        cls, registered_name: str, tool_obj: FastMCPTool, ctx: _ToolFilterContext
+    ) -> bool:
+        """Full listing-time visibility: authorization plus service availability.
+
+        Service availability (Jira/Confluence configured/authenticated) is a
+        listing-only graceful-hide, not enforced at call time: a tool call for
+        an unconfigured service fails naturally when it tries to use the
+        fetcher, so there's no separate "Unknown tool" boundary to bypass.
+        """
+        if not cls._is_tool_authorized(registered_name, tool_obj, ctx):
+            return False
+
+        tool_tags = tool_obj.tags
 
         # Exclude Jira/Confluence tools if config is not fully authenticated
         is_jira_tool = "jira" in tool_tags
@@ -367,6 +393,20 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             f"_list_tools_mcp: Total tools after filtering: {len(filtered_tools)}"
         )
         return filtered_tools
+
+    async def _call_tool_mcp(self, key: str, arguments: dict[str, Any]) -> Any:
+        # Enforce the same ENABLED_TOOLS/toolset/read-only boundary at call time
+        # as at listing time, so a client that knows a tool's name cannot invoke
+        # a tool that was excluded from the listing (disabled toolset, not in
+        # the ENABLED_TOOLS allowlist, or a write tool in read-only mode).
+        # Denials look identical to an unknown tool (no exists-but-disabled leak).
+        ctx = self._tool_filter_context()
+        if ctx is not None:
+            tool_obj = await self.get_tool(key)
+            if tool_obj is None or not self._is_tool_authorized(key, tool_obj, ctx):
+                unknown_tool_msg = f"Unknown tool: {key}"
+                raise NotFoundError(unknown_tool_msg)
+        return await super()._call_tool_mcp(key, arguments)
 
     def http_app(
         self,
