@@ -76,9 +76,9 @@ async def search(
         str | None,
         Field(
             description=(
-                "(Optional) Comma-separated list of space keys to filter results by. "
-                "Overrides the environment variable CONFLUENCE_SPACES_FILTER if provided. "
-                "Use empty string to disable filtering."
+                "(Optional) Comma-separated list of space keys to narrow results by. "
+                "Narrows within the environment variable CONFLUENCE_SPACES_FILTER "
+                "allowlist if one is configured; it cannot be used to escape it."
             ),
             default=None,
         ),

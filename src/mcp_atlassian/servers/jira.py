@@ -540,8 +540,9 @@ async def search(
         str | None,
         Field(
             description=(
-                "(Optional) Comma-separated list of project keys to filter results by. "
-                "Overrides the environment variable JIRA_PROJECTS_FILTER if provided."
+                "(Optional) Comma-separated list of project keys to narrow results by. "
+                "Narrows within the environment variable JIRA_PROJECTS_FILTER "
+                "allowlist if one is configured; it cannot be used to escape it."
             ),
             default=None,
         ),

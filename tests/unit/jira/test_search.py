@@ -291,7 +291,7 @@ class TestSearchMixin:
         # Test with single project filter (non-reserved keys are not quoted)
         result = search_mixin.search_issues("text ~ 'test'", projects_filter="TEST")
         search_mixin.jira.jql.assert_called_with(
-            "(text ~ 'test') AND project = TEST",
+            "(text ~ 'test') AND (project = TEST)",
             fields=ANY,
             start=0,
             limit=50,
@@ -303,7 +303,7 @@ class TestSearchMixin:
         # Test with multiple project filter
         result = search_mixin.search_issues("text ~ 'test'", projects_filter="TEST,DEV")
         search_mixin.jira.jql.assert_called_with(
-            "(text ~ 'test') AND project IN (TEST, DEV)",
+            "(text ~ 'test') AND (project IN (TEST, DEV))",
             fields=ANY,
             start=0,
             limit=50,
@@ -338,7 +338,7 @@ class TestSearchMixin:
         # Test with config filter (non-reserved keys are not quoted)
         result = search_mixin.search_issues("text ~ 'test'")
         search_mixin.jira.jql.assert_called_with(
-            "(text ~ 'test') AND project IN (TEST, DEV)",
+            "(text ~ 'test') AND (project IN (TEST, DEV))",
             fields=ANY,
             start=0,
             limit=50,
@@ -347,10 +347,11 @@ class TestSearchMixin:
         assert len(result.issues) == 1
         assert result.total == 1
 
-        # Test with override
+        # A projects_filter arg narrows within the config allowlist (hard
+        # boundary): the config filter is still ANDed, it cannot be replaced.
         result = search_mixin.search_issues("text ~ 'test'", projects_filter="OVERRIDE")
         search_mixin.jira.jql.assert_called_with(
-            "(text ~ 'test') AND project = OVERRIDE",
+            "((text ~ 'test') AND (project IN (TEST, DEV))) AND (project = OVERRIDE)",
             fields=ANY,
             start=0,
             limit=50,
@@ -359,12 +360,13 @@ class TestSearchMixin:
         assert len(result.issues) == 1
         assert result.total == 1
 
-        # Test with override - multiple projects
+        # Same with a multi-project narrowing arg.
         result = search_mixin.search_issues(
             "text ~ 'test'", projects_filter="OVER1,OVER2"
         )
         search_mixin.jira.jql.assert_called_with(
-            "(text ~ 'test') AND project IN (OVER1, OVER2)",
+            "((text ~ 'test') AND (project IN (TEST, DEV))) "
+            "AND (project IN (OVER1, OVER2))",
             fields=ANY,
             start=0,
             limit=50,
@@ -679,7 +681,7 @@ class TestSearchMixin:
         search_mixin.search_issues("text ~ 'test'", projects_filter="TEST")
 
         # Assert: JQL verification
-        assert get_jql_from_call() == "(text ~ 'test') AND project = TEST"
+        assert get_jql_from_call() == "(text ~ 'test') AND (project = TEST)"
 
         # Reset mocks for next call
         search_mixin.jira.post.reset_mock()
@@ -688,16 +690,16 @@ class TestSearchMixin:
         # Act: Multiple projects filter
         search_mixin.search_issues("text ~ 'test'", projects_filter="TEST, DEV")
         # Assert: JQL verification
-        assert get_jql_from_call() == "(text ~ 'test') AND project IN (TEST, DEV)"
+        assert get_jql_from_call() == "(text ~ 'test') AND (project IN (TEST, DEV))"
 
         # Reset mocks for next call
         search_mixin.jira.post.reset_mock()
         search_mixin.jira.jql.reset_mock()
 
-        # Act: Call with both JQL and filter
+        # Act: Call with both JQL and filter — the allowlist is always ANDed, so a
+        # caller-supplied project clause cannot escape the configured filter.
         search_mixin.search_issues("project = OTHER", projects_filter="TEST")
-        # Assert: JQL verification (existing JQL has priority)
-        assert get_jql_from_call() == "project = OTHER"
+        assert get_jql_from_call() == "(project = OTHER) AND (project = TEST)"
 
     @pytest.mark.parametrize("is_cloud", [True, False])
     def test_search_issues_with_config_projects_filter_jql_construction(
@@ -723,16 +725,20 @@ class TestSearchMixin:
         # Act: Use config filter (non-reserved keys are not quoted)
         search_mixin.search_issues("text ~ 'test'")
         # Assert: JQL verification
-        assert get_jql_from_call() == "(text ~ 'test') AND project IN (CONF1, CONF2)"
+        assert get_jql_from_call() == (
+            "(text ~ 'test') AND (project IN (CONF1, CONF2))"
+        )
 
         # Reset mocks for next call
         search_mixin.jira.post.reset_mock()
         search_mixin.jira.jql.reset_mock()
 
-        # Act: Override config filter with parameter
+        # Act: a projects_filter arg narrows within the config allowlist; it cannot
+        # replace it, so the config filter is still ANDed (hard boundary).
         search_mixin.search_issues("text ~ 'test'", projects_filter="OVERRIDE")
-        # Assert: JQL verification
-        assert get_jql_from_call() == "(text ~ 'test') AND project = OVERRIDE"
+        assert get_jql_from_call() == (
+            "((text ~ 'test') AND (project IN (CONF1, CONF2))) AND (project = OVERRIDE)"
+        )
 
     @pytest.mark.parametrize("is_cloud", [True, False])
     def test_search_issues_with_empty_jql_and_projects_filter(
@@ -938,7 +944,7 @@ class TestSearchMixin:
         )
         assert (
             get_jql_from_call()
-            == '(assignee = "testuser") AND project = PROJ1 ORDER BY updated DESC'
+            == '(assignee = "testuser") AND (project = PROJ1) ORDER BY updated DESC'
         )
 
         # Reset mocks
@@ -951,7 +957,8 @@ class TestSearchMixin:
         )
         assert (
             get_jql_from_call()
-            == '(status = "Done") AND project IN (PROJ1, PROJ2) ORDER BY created ASC'
+            == '(status = "Done") AND (project IN (PROJ1, PROJ2)) '
+            "ORDER BY created ASC"
         )
 
         # Reset mocks
@@ -964,7 +971,7 @@ class TestSearchMixin:
         )
         assert (
             get_jql_from_call()
-            == "(priority = High) AND project = PROJ1 order by updated desc"
+            == "(priority = High) AND (project = PROJ1) order by updated desc"
         )
 
     # Tests for JQL injection prevention in projects filter (PR #949)
