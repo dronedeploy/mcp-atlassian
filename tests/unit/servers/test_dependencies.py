@@ -699,6 +699,7 @@ class TestGetJiraFetcher:
         mock_context,
         mock_request,
         config_factory,
+        monkeypatch,
     ):
         """Test fallback to global JiraFetcher in various scenarios."""
         # Test both HTTP context without user token and non-HTTP context
@@ -712,6 +713,9 @@ class TestGetJiraFetcher:
             if scenario["setup_http"]:
                 _setup_mock_request_state(mock_request)
                 mock_get_http_request.return_value = mock_request
+                # An unauthenticated HTTP request only falls back to the
+                # global fetcher when the operator explicitly opts in.
+                monkeypatch.setenv("ALLOW_GLOBAL_CRED_FALLBACK", "true")
             else:
                 mock_get_http_request.side_effect = RuntimeError("No HTTP context")
 
@@ -733,6 +737,30 @@ class TestGetJiraFetcher:
             # Reset mocks for next iteration
             mock_jira_fetcher_class.reset_mock()
             mock_get_http_request.reset_mock()
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.JiraFetcher")
+    async def test_global_fallback_refused_over_http_by_default(
+        self,
+        mock_jira_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+        monkeypatch,
+    ):
+        """An unauthenticated HTTP caller must not silently become the operator."""
+        monkeypatch.delenv("ALLOW_GLOBAL_CRED_FALLBACK", raising=False)
+        _setup_mock_request_state(mock_request)
+        mock_get_http_request.return_value = mock_request
+
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        with pytest.raises(ValueError, match="ALLOW_GLOBAL_CRED_FALLBACK"):
+            await get_jira_fetcher(mock_context)
+
+        mock_jira_fetcher_class.assert_not_called()
 
     @pytest.mark.parametrize(
         "error_scenario,expected_error_match",
@@ -1038,6 +1066,7 @@ class TestGetConfluenceFetcher:
         mock_context,
         mock_request,
         config_factory,
+        monkeypatch,
     ):
         """Test fallback to global ConfluenceFetcher in various scenarios."""
         # Test both HTTP context without user token and non-HTTP context
@@ -1051,6 +1080,9 @@ class TestGetConfluenceFetcher:
             if scenario["setup_http"]:
                 _setup_mock_request_state(mock_request)
                 mock_get_http_request.return_value = mock_request
+                # An unauthenticated HTTP request only falls back to the
+                # global fetcher when the operator explicitly opts in.
+                monkeypatch.setenv("ALLOW_GLOBAL_CRED_FALLBACK", "true")
             else:
                 mock_get_http_request.side_effect = RuntimeError("No HTTP context")
 
@@ -1072,6 +1104,30 @@ class TestGetConfluenceFetcher:
             # Reset mocks for next iteration
             mock_confluence_fetcher_class.reset_mock()
             mock_get_http_request.reset_mock()
+
+    @patch("mcp_atlassian.servers.dependencies.get_http_request")
+    @patch("mcp_atlassian.servers.dependencies.ConfluenceFetcher")
+    async def test_global_fallback_refused_over_http_by_default(
+        self,
+        mock_confluence_fetcher_class,
+        mock_get_http_request,
+        mock_context,
+        mock_request,
+        config_factory,
+        monkeypatch,
+    ):
+        """An unauthenticated HTTP caller must not silently become the operator."""
+        monkeypatch.delenv("ALLOW_GLOBAL_CRED_FALLBACK", raising=False)
+        _setup_mock_request_state(mock_request)
+        mock_get_http_request.return_value = mock_request
+
+        app_context = config_factory.create_app_context()
+        _setup_mock_context(mock_context, app_context)
+
+        with pytest.raises(ValueError, match="ALLOW_GLOBAL_CRED_FALLBACK"):
+            await get_confluence_fetcher(mock_context)
+
+        mock_confluence_fetcher_class.assert_not_called()
 
     @pytest.mark.parametrize(
         "email_scenario,expected_email",

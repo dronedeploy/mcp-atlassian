@@ -17,6 +17,7 @@ from starlette.requests import Request
 from mcp_atlassian.confluence import ConfluenceConfig, ConfluenceFetcher
 from mcp_atlassian.jira import JiraConfig, JiraFetcher
 from mcp_atlassian.servers.context import MainAppContext
+from mcp_atlassian.utils.env import is_env_truthy
 from mcp_atlassian.utils.oauth import OAuthConfig
 from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
@@ -27,6 +28,10 @@ if TYPE_CHECKING:
     from mcp_atlassian.jira.config import JiraConfig as UserJiraConfigType
 
 logger = logging.getLogger("mcp-atlassian.servers.dependencies")
+
+# Kept in sync with servers.main.ALLOW_GLOBAL_CRED_FALLBACK_ENV (duplicated,
+# not imported, to avoid a circular import between the two modules).
+ALLOW_GLOBAL_CRED_FALLBACK_ENV = "ALLOW_GLOBAL_CRED_FALLBACK"
 
 
 # ---------------------------------------------------------------------------
@@ -614,12 +619,21 @@ async def _get_fetcher(ctx: Context, spec: _ServiceSpec) -> Any:
             )
 
         else:
+            if not is_env_truthy(ALLOW_GLOBAL_CRED_FALLBACK_ENV):
+                # An unauthenticated caller on a remotely exposed streamable-http
+                # server must not silently transact as the operator via the
+                # global fallback below. UserTokenMiddleware already 401s this
+                # case; this is defense in depth if that layer is bypassed.
+                raise ValueError(
+                    "No Atlassian credentials provided for this request, and "
+                    f"{ALLOW_GLOBAL_CRED_FALLBACK_ENV} is not set."
+                )
             logger.debug(
                 f"{fn_name}: No user-specific {spec.name}Fetcher. "
                 f"Auth type: {user_auth_type}. "
                 f"Token present: "
                 f"{hasattr(request.state, 'user_atlassian_token')}. "
-                "Will use global fallback."
+                f"{ALLOW_GLOBAL_CRED_FALLBACK_ENV} is set; using global fallback."
             )
     except RuntimeError:
         logger.debug(

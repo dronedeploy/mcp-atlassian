@@ -62,6 +62,7 @@ DEFAULT_ALLOWED_REDIRECT_URIS = [
 ]
 DEFAULT_ALLOWED_GRANT_TYPES = ["authorization_code", "refresh_token"]
 OAUTH_PROXY_ENABLE_ENV = "ATLASSIAN_OAUTH_PROXY_ENABLE"
+ALLOW_GLOBAL_CRED_FALLBACK_ENV = "ALLOW_GLOBAL_CRED_FALLBACK"
 
 
 def _sanitize_schema_for_compatibility(tool: MCPTool) -> MCPTool:
@@ -458,6 +459,28 @@ class UserTokenMiddleware:
             and self._should_process_auth(scope_copy)
         ):
             self._process_authentication_headers(scope_copy)
+
+            # An MCP POST with no per-user identity would otherwise fall through
+            # to the operator's global Atlassian credentials in _get_fetcher, so
+            # any unauthenticated caller on a remotely exposed streamable-http
+            # server could transact as the operator. Refuse unless explicitly
+            # opted in; non-HTTP (stdio, single-user) transports are unaffected.
+            if not scope_copy["state"].get(
+                "auth_validation_error"
+            ) and not scope_copy["state"].get("user_atlassian_auth_type"):
+                if is_env_truthy(ALLOW_GLOBAL_CRED_FALLBACK_ENV):
+                    logger.debug(
+                        "UserTokenMiddleware: No per-user identity; "
+                        f"{ALLOW_GLOBAL_CRED_FALLBACK_ENV} is set, allowing "
+                        "global-credential fallback."
+                    )
+                else:
+                    scope_copy["state"]["auth_validation_error"] = (
+                        "Unauthorized: No Atlassian credentials provided. Set "
+                        f"{ALLOW_GLOBAL_CRED_FALLBACK_ENV}=true to allow this "
+                        "server to fall back to its own configured credentials "
+                        "for unauthenticated requests."
+                    )
 
         # Create wrapped send function to handle client disconnections gracefully
         async def safe_send(message: Message) -> None:
