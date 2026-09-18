@@ -284,12 +284,13 @@ async def get_all_tools() -> dict[str, dict[str, Any]]:
     from mcp_atlassian.servers.confluence import confluence_mcp
     from mcp_atlassian.servers.jira import jira_mcp
 
-    jira_tools = await jira_mcp.get_tools()
-    confluence_tools = await confluence_mcp.get_tools()
+    jira_tools = await jira_mcp.list_tools()
+    confluence_tools = await confluence_mcp.list_tools()
 
     all_tools: dict[str, dict[str, Any]] = {}
 
-    for name, tool in jira_tools.items():
+    for tool in jira_tools:
+        name = tool.name
         prefixed = f"jira_{name}"
         mcp_tool = tool.to_mcp_tool(name=prefixed)
         all_tools[prefixed] = {
@@ -299,7 +300,8 @@ async def get_all_tools() -> dict[str, dict[str, Any]]:
             "is_write": "write" in (tool.tags if hasattr(tool, "tags") else set()),
         }
 
-    for name, tool in confluence_tools.items():
+    for tool in confluence_tools:
+        name = tool.name
         prefixed = f"confluence_{name}"
         mcp_tool = tool.to_mcp_tool(name=prefixed)
         all_tools[prefixed] = {

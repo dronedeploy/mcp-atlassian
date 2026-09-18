@@ -124,7 +124,7 @@ class TestMCPProtocolIntegration:
 
                 # Mock get_tools to return sample tools
                 async def mock_get_tools():
-                    tools = {}
+                    tools = []
                     # Add sample Jira tools
                     for tool_name in [
                         "jira_get_issue",
@@ -142,7 +142,8 @@ class TestMCPProtocolIntegration:
                             description=f"Tool {tool_name}",
                             inputSchema={"type": "object", "properties": {}},
                         )
-                        tools[tool_name] = tool
+                        tool.name = tool_name
+                        tools.append(tool)
 
                     # Add sample Confluence tools
                     for tool_name in ["confluence_get_page", "confluence_create_page"]:
@@ -157,11 +158,12 @@ class TestMCPProtocolIntegration:
                             description=f"Tool {tool_name}",
                             inputSchema={"type": "object", "properties": {}},
                         )
-                        tools[tool_name] = tool
+                        tool.name = tool_name
+                        tools.append(tool)
 
                     return tools
 
-                atlassian_mcp_server.get_tools = mock_get_tools
+                atlassian_mcp_server.list_tools = mock_get_tools
 
                 # Get filtered tools
                 tools = await atlassian_mcp_server._list_tools_mcp()
@@ -198,7 +200,7 @@ class TestMCPProtocolIntegration:
 
             # Mock get_tools
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 # Add mix of read and write tools
                 read_tools = [
                     "jira_get_issue",
@@ -223,7 +225,8 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
 
                 for tool_name in write_tools:
                     tool = MagicMock(spec=FastMCPTool)
@@ -237,11 +240,12 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
 
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             # Get filtered tools
             tools = await atlassian_mcp_server._list_tools_mcp()
@@ -280,7 +284,7 @@ class TestMCPProtocolIntegration:
 
             # Mock get_tools
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 all_tools = [
                     "jira_get_issue",
                     "jira_create_issue",
@@ -308,11 +312,12 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
 
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             # Get filtered tools
             tools = await atlassian_mcp_server._list_tools_mcp()
@@ -349,7 +354,7 @@ class TestMCPProtocolIntegration:
 
             # Mock get_tools
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 all_tools = [
                     "jira_get_issue",
                     "jira_create_issue",
@@ -376,11 +381,12 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
 
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             # Get filtered tools
             tools = await atlassian_mcp_server._list_tools_mcp()
@@ -898,7 +904,7 @@ class TestMCPProtocolIntegration:
 
             # Mock get_tools
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 tool_configs = [
                     ("jira_get_issue", {"jira", "read"}),  # Should be included
                     ("jira_create_issue", {"jira", "write"}),  # Excluded by read-only
@@ -920,11 +926,12 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
 
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             # Get filtered tools
             tools = await atlassian_mcp_server._list_tools_mcp()
@@ -943,7 +950,7 @@ class TestMCPProtocolIntegration:
         async def mock_get_tools():
             pytest.fail("get_tools should not be called when context is missing")
 
-        atlassian_mcp_server.get_tools = mock_get_tools
+        atlassian_mcp_server.list_tools = mock_get_tools
 
         # Get filtered tools
         tools = await atlassian_mcp_server._list_tools_mcp()
@@ -993,7 +1000,7 @@ class TestMCPProtocolIntegration:
             atlassian_mcp_server._mcp_server.request_context = request_context
 
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 tool_configs = [
                     ("jira_get_issue", {"jira", "read", "toolset:jira_issues"}),
                     ("jira_search_issues", {"jira", "read", "toolset:jira_issues"}),
@@ -1011,10 +1018,11 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             tools = await atlassian_mcp_server._list_tools_mcp()
 
@@ -1045,7 +1053,7 @@ class TestMCPProtocolIntegration:
             atlassian_mcp_server._mcp_server.request_context = request_context
 
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 tool_configs = [
                     ("jira_get_issue", {"jira", "read", "toolset:jira_issues"}),
                     ("jira_search_issues", {"jira", "read", "toolset:jira_issues"}),
@@ -1059,10 +1067,11 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             tools = await atlassian_mcp_server._list_tools_mcp()
 
@@ -1094,7 +1103,7 @@ class TestMCPProtocolIntegration:
             atlassian_mcp_server._mcp_server.request_context = request_context
 
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 tool_configs = [
                     ("jira_get_issue", {"jira", "read", "toolset:jira_issues"}),
                     ("jira_create_issue", {"jira", "write", "toolset:jira_issues"}),
@@ -1108,10 +1117,11 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             tools = await atlassian_mcp_server._list_tools_mcp()
 
@@ -1143,7 +1153,7 @@ class TestMCPProtocolIntegration:
             atlassian_mcp_server._mcp_server.request_context = request_context
 
             async def mock_get_tools():
-                tools = {}
+                tools = []
                 tool_configs = [
                     ("jira_get_issue", {"jira", "read", "toolset:jira_issues"}),
                     ("jira_get_agile_boards", {"jira", "read", "toolset:jira_agile"}),
@@ -1160,10 +1170,11 @@ class TestMCPProtocolIntegration:
                         description=f"Tool {tool_name}",
                         inputSchema={"type": "object", "properties": {}},
                     )
-                    tools[tool_name] = tool
+                    tool.name = tool_name
+                    tools.append(tool)
                 return tools
 
-            atlassian_mcp_server.get_tools = mock_get_tools
+            atlassian_mcp_server.list_tools = mock_get_tools
 
             tools = await atlassian_mcp_server._list_tools_mcp()
 

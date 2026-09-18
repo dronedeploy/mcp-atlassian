@@ -34,9 +34,10 @@ def all_tool_schemas() -> dict[str, dict]:
     import asyncio
 
     async def _load() -> dict[str, dict]:
-        tools = await main_mcp.get_tools()
+        tools = await main_mcp.list_tools()
         schemas: dict[str, dict] = {}
-        for name, tool_obj in tools.items():
+        for tool_obj in tools:
+            name = tool_obj.name
             mcp_tool = tool_obj.to_mcp_tool(name=name)
             _sanitize_schema_for_compatibility(mcp_tool)
             schemas[name] = mcp_tool.inputSchema
@@ -63,8 +64,8 @@ def _get_tool_names() -> list[str]:
     import asyncio
 
     async def _load() -> list[str]:
-        tools = await main_mcp.get_tools()
-        return sorted(tools.keys())
+        tools = await main_mcp.list_tools()
+        return sorted(tool.name for tool in tools)
 
     # Use asyncio.run() which creates a fresh event loop
     # This is safe at collection time (before any test event loop exists)

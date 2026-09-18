@@ -1,6 +1,7 @@
 """Unit tests for the ConfluenceClient class."""
 
 import os
+import tempfile
 from unittest.mock import MagicMock, patch
 
 from mcp_atlassian.confluence import ConfluenceFetcher
@@ -378,17 +379,18 @@ def test_confluence_fetcher_attachment_method_calls():
 
         fetcher = ConfluenceFetcher()
 
-        # Test upload_attachment can be called
-        with (
-            patch("os.path.exists", return_value=True),
-            patch("os.path.isabs", return_value=True),
-            patch("os.path.basename", return_value="test.txt"),
-            patch("os.path.getsize", return_value=100),
-            patch("builtins.open", MagicMock()),
-        ):
-            result = fetcher.upload_attachment("123", "/path/to/test.txt")
-            assert result["success"] is True
-            assert result["content_id"] == "123"
+        # Test upload_attachment can be called. Uses a real in-workspace file
+        # rather than mocking os.path.* : validate_safe_path resolves the real
+        # filesystem, so a fake out-of-workspace path is (correctly) rejected.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch("os.getcwd", return_value=tmp_dir):
+                file_path = os.path.join(tmp_dir, "test.txt")
+                with open(file_path, "wb") as f:
+                    f.write(b"test content")
+
+                result = fetcher.upload_attachment("123", file_path)
+                assert result["success"] is True
+                assert result["content_id"] == "123"
 
         # Test get_content_attachments can be called
         mock_confluence.get_attachments_from_content.return_value = {

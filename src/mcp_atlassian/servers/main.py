@@ -4,9 +4,9 @@ import base64
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, Literal, Optional
+from typing import Any, Literal, NamedTuple, Optional
 from urllib.parse import urlparse
 
 from cachetools import TTLCache
@@ -194,6 +194,16 @@ async def main_lifespan(app: FastMCP[MainAppContext]) -> AsyncIterator[dict[str,
         logger.info("Main Atlassian MCP server lifespan shutdown complete.")
 
 
+class _ToolFilterContext(NamedTuple):
+    """Snapshot of the request-scoped state used to decide tool visibility."""
+
+    app_lifespan_state: MainAppContext | None
+    read_only: bool
+    enabled_tools_filter: set[str] | None
+    enabled_toolsets_filter: set[str] | None
+    header_based_services: dict[str, bool]
+
+
 class AtlassianMCP(FastMCP[MainAppContext]):
     """Custom FastMCP server class for Atlassian integration with tool filtering."""
 
@@ -214,14 +224,10 @@ class AtlassianMCP(FastMCP[MainAppContext]):
             return self._active_streamable_http_path
         return self._normalize_http_path(fastmcp_settings.streamable_http_path)
 
-    async def _list_tools_mcp(self) -> list[MCPTool]:
-        # Filter tools based on enabled_tools, read_only mode, and service configuration from the lifespan context.
+    def _tool_filter_context(self) -> _ToolFilterContext | None:
         req_context = self._mcp_server.request_context
         if req_context is None or req_context.lifespan_context is None:
-            logger.warning(
-                "Lifespan context not available during _list_tools_mcp call."
-            )
-            return []
+            return None
 
         lifespan_ctx_dict = req_context.lifespan_context
         app_lifespan_state: MainAppContext | None = (
@@ -255,73 +261,101 @@ class AtlassianMCP(FastMCP[MainAppContext]):
                     f"Header-based service availability: {header_based_services}"
                 )
 
-        logger.debug(
-            f"_list_tools_mcp: read_only={read_only}, enabled_tools_filter={enabled_tools_filter}, header_services={header_based_services}"
+        return _ToolFilterContext(
+            app_lifespan_state=app_lifespan_state,
+            read_only=read_only,
+            enabled_tools_filter=enabled_tools_filter,
+            enabled_toolsets_filter=enabled_toolsets_filter,
+            header_based_services=header_based_services,
         )
 
-        all_tools: dict[str, FastMCPTool] = await self.get_tools()
+    @staticmethod
+    def _is_tool_permitted(
+        registered_name: str, tool_obj: FastMCPTool, ctx: _ToolFilterContext
+    ) -> bool:
+        tool_tags = tool_obj.tags
+
+        if not should_include_tool_by_toolset(
+            tool_tags, ctx.enabled_toolsets_filter
+        ):
+            logger.debug(f"Excluding tool '{registered_name}' (toolset not enabled)")
+            return False
+
+        if not should_include_tool(registered_name, ctx.enabled_tools_filter):
+            logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
+            return False
+
+        if tool_obj and ctx.read_only and "write" in tool_tags:
+            logger.debug(
+                f"Excluding tool '{registered_name}' due to read-only mode and 'write' tag"
+            )
+            return False
+
+        # Exclude Jira/Confluence tools if config is not fully authenticated
+        is_jira_tool = "jira" in tool_tags
+        is_confluence_tool = "confluence" in tool_tags
+        app_lifespan_state = ctx.app_lifespan_state
+        header_based_services = ctx.header_based_services
+        if app_lifespan_state:
+            jira_available = (
+                app_lifespan_state.full_jira_config is not None
+            ) or header_based_services.get("jira", False)
+            confluence_available = (
+                app_lifespan_state.full_confluence_config is not None
+            ) or header_based_services.get("confluence", False)
+
+            if is_jira_tool and not jira_available:
+                logger.debug(
+                    f"Excluding Jira tool '{registered_name}' as Jira configuration/authentication is incomplete and no header-based auth available."
+                )
+                return False
+            if is_confluence_tool and not confluence_available:
+                logger.debug(
+                    f"Excluding Confluence tool '{registered_name}' as Confluence configuration/authentication is incomplete and no header-based auth available."
+                )
+                return False
+        elif is_jira_tool or is_confluence_tool:
+            jira_available = header_based_services.get("jira", False)
+            confluence_available = header_based_services.get("confluence", False)
+
+            if is_jira_tool and not jira_available:
+                logger.debug(
+                    f"Excluding Jira tool '{registered_name}' as no Jira authentication available."
+                )
+                return False
+            if is_confluence_tool and not confluence_available:
+                logger.debug(
+                    f"Excluding Confluence tool '{registered_name}' as no Confluence authentication available."
+                )
+                return False
+
+        return True
+
+    async def _list_tools_mcp(self) -> list[MCPTool]:
+        # Filter tools based on enabled_tools, read_only mode, and service configuration from the lifespan context.
+        ctx = self._tool_filter_context()
+        if ctx is None:
+            logger.warning(
+                "Lifespan context not available during _list_tools_mcp call."
+            )
+            return []
+
         logger.debug(
-            f"Aggregated {len(all_tools)} tools before filtering: {list(all_tools.keys())}"
+            f"_list_tools_mcp: read_only={ctx.read_only}, "
+            f"enabled_tools_filter={ctx.enabled_tools_filter}, "
+            f"header_services={ctx.header_based_services}"
+        )
+
+        all_tools: Sequence[FastMCPTool] = await self.list_tools()
+        logger.debug(
+            f"Aggregated {len(all_tools)} tools before filtering: "
+            f"{[tool.name for tool in all_tools]}"
         )
 
         filtered_tools: list[MCPTool] = []
-        for registered_name, tool_obj in all_tools.items():
-            tool_tags = tool_obj.tags
-
-            if not should_include_tool_by_toolset(tool_tags, enabled_toolsets_filter):
-                logger.debug(
-                    f"Excluding tool '{registered_name}' (toolset not enabled)"
-                )
-                continue
-
-            if not should_include_tool(registered_name, enabled_tools_filter):
-                logger.debug(f"Excluding tool '{registered_name}' (not enabled)")
-                continue
-
-            if tool_obj and read_only and "write" in tool_tags:
-                logger.debug(
-                    f"Excluding tool '{registered_name}' due to read-only mode and 'write' tag"
-                )
-                continue
-
-            # Exclude Jira/Confluence tools if config is not fully authenticated
-            is_jira_tool = "jira" in tool_tags
-            is_confluence_tool = "confluence" in tool_tags
-            service_configured_and_available = True
-            if app_lifespan_state:
-                jira_available = (
-                    app_lifespan_state.full_jira_config is not None
-                ) or header_based_services.get("jira", False)
-                confluence_available = (
-                    app_lifespan_state.full_confluence_config is not None
-                ) or header_based_services.get("confluence", False)
-
-                if is_jira_tool and not jira_available:
-                    logger.debug(
-                        f"Excluding Jira tool '{registered_name}' as Jira configuration/authentication is incomplete and no header-based auth available."
-                    )
-                    service_configured_and_available = False
-                if is_confluence_tool and not confluence_available:
-                    logger.debug(
-                        f"Excluding Confluence tool '{registered_name}' as Confluence configuration/authentication is incomplete and no header-based auth available."
-                    )
-                    service_configured_and_available = False
-            elif is_jira_tool or is_confluence_tool:
-                jira_available = header_based_services.get("jira", False)
-                confluence_available = header_based_services.get("confluence", False)
-
-                if is_jira_tool and not jira_available:
-                    logger.debug(
-                        f"Excluding Jira tool '{registered_name}' as no Jira authentication available."
-                    )
-                    service_configured_and_available = False
-                if is_confluence_tool and not confluence_available:
-                    logger.debug(
-                        f"Excluding Confluence tool '{registered_name}' as no Confluence authentication available."
-                    )
-                    service_configured_and_available = False
-
-            if not service_configured_and_available:
+        for tool_obj in all_tools:
+            registered_name = tool_obj.name
+            if not self._is_tool_permitted(registered_name, tool_obj, ctx):
                 continue
 
             mcp_tool = tool_obj.to_mcp_tool(name=registered_name)
@@ -820,8 +854,8 @@ main_mcp = AtlassianMCP(
     lifespan=main_lifespan,
     auth=_build_auth_provider(),
 )
-main_mcp.mount(jira_mcp, "jira")
-main_mcp.mount(confluence_mcp, "confluence")
+main_mcp.mount(jira_mcp, namespace="jira")
+main_mcp.mount(confluence_mcp, namespace="confluence")
 
 
 def _get_server_version_payload() -> dict[str, str]:

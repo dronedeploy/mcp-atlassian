@@ -224,7 +224,8 @@ class TestToolsetTagCompleteness:
 
         loop = asyncio.new_event_loop()
         try:
-            return loop.run_until_complete(jira_mcp.get_tools())
+            tools = loop.run_until_complete(jira_mcp.list_tools())
+            return {tool.name: tool for tool in tools}
         finally:
             loop.close()
 
@@ -237,7 +238,8 @@ class TestToolsetTagCompleteness:
 
         loop = asyncio.new_event_loop()
         try:
-            return loop.run_until_complete(confluence_mcp.get_tools())
+            tools = loop.run_until_complete(confluence_mcp.list_tools())
+            return {tool.name: tool for tool in tools}
         finally:
             loop.close()
 

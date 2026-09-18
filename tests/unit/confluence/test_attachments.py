@@ -166,33 +166,27 @@ class TestAttachmentsMixin:
             assert call_args[1]["data"]["minorEdit"] == "false"
             # Note: comment is now in files dict as multipart form data, not in data dict
 
-    def test_upload_attachment_relative_path(self, attachments_mixin: AttachmentsMixin):
-        """Test attachment upload with a relative path."""
+    def test_upload_attachment_relative_path(
+        self, attachments_mixin: AttachmentsMixin, tmp_path, monkeypatch
+    ):
+        """Test attachment upload with a relative path.
+
+        Uses a real in-workspace file rather than mocking os.path.abspath:
+        validate_safe_path resolves the real filesystem, so a mocked abspath
+        that points outside the workspace would be (correctly) rejected.
+        """
         # Mock the REST API call
         self._mock_rest_api_upload(attachments_mixin)
 
-        # Mock file operations
-        with (
-            patch("os.path.exists") as mock_exists,
-            patch("os.path.getsize") as mock_getsize,
-            patch("os.path.isabs") as mock_isabs,
-            patch("os.path.abspath") as mock_abspath,
-            patch("os.path.basename") as mock_basename,
-            patch("builtins.open", mock_open(read_data=b"test content")),
-        ):
-            mock_exists.return_value = True
-            mock_getsize.return_value = 100
-            mock_isabs.return_value = False
-            mock_abspath.return_value = "/absolute/path/test_file.txt"
-            mock_basename.return_value = "test_file.txt"
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "test_file.txt").write_bytes(b"test content")
 
-            # Call the method with a relative path
-            result = attachments_mixin.upload_attachment("123456", "test_file.txt")
+        # Call the method with a relative path
+        result = attachments_mixin.upload_attachment("123456", "test_file.txt")
 
-            # Assertions
-            assert result["success"] is True
-            mock_isabs.assert_called_once_with("test_file.txt")
-            mock_abspath.assert_called_once_with("test_file.txt")
+        # Assertions
+        assert result["success"] is True
+        assert result["filename"] == "test_file.txt"
 
     def test_upload_attachment_no_content_id(self, attachments_mixin: AttachmentsMixin):
         """Test attachment upload with no content ID."""
@@ -1214,7 +1208,7 @@ class TestDownloadAttachmentServerTool:
                 download_attachment as server_download_attachment,
             )
 
-            result = await server_download_attachment.fn(
+            result = await server_download_attachment(
                 ctx=MagicMock(), attachment_id="att123456"
             )
 
@@ -1245,7 +1239,7 @@ class TestDownloadAttachmentServerTool:
                 download_attachment as server_download_attachment,
             )
 
-            result = await server_download_attachment.fn(
+            result = await server_download_attachment(
                 ctx=MagicMock(), attachment_id="att123456"
             )
 
@@ -1280,7 +1274,7 @@ class TestDownloadAttachmentServerTool:
                 download_attachment as server_download_attachment,
             )
 
-            result = await server_download_attachment.fn(
+            result = await server_download_attachment(
                 ctx=MagicMock(), attachment_id="att_huge"
             )
 
@@ -1304,7 +1298,7 @@ class TestDownloadAttachmentServerTool:
                 download_attachment as server_download_attachment,
             )
 
-            result = await server_download_attachment.fn(
+            result = await server_download_attachment(
                 ctx=MagicMock(), attachment_id="att123456"
             )
 
@@ -1343,7 +1337,7 @@ class TestDownloadContentAttachmentsServerTool:
                 download_content_attachments as server_download_content,
             )
 
-            results = await server_download_content.fn(
+            results = await server_download_content(
                 ctx=MagicMock(), content_id="123456"
             )
 
@@ -1371,7 +1365,7 @@ class TestDownloadContentAttachmentsServerTool:
                 download_content_attachments as server_download_content,
             )
 
-            results = await server_download_content.fn(
+            results = await server_download_content(
                 ctx=MagicMock(), content_id="123456"
             )
 
@@ -1397,7 +1391,7 @@ class TestDownloadContentAttachmentsServerTool:
                 download_content_attachments as server_download_content,
             )
 
-            results = await server_download_content.fn(
+            results = await server_download_content(
                 ctx=MagicMock(), content_id="123456"
             )
 
@@ -1433,7 +1427,7 @@ class TestDownloadContentAttachmentsServerTool:
                 download_content_attachments as server_download_content,
             )
 
-            results = await server_download_content.fn(
+            results = await server_download_content(
                 ctx=MagicMock(), content_id="123456"
             )
 
