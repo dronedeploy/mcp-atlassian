@@ -1,0 +1,5 @@
+# This fork bridges Jira/Confluence to production Atlassian credentials, so
+# changes here need security review, not just correctness review.
+# See https://docs.github.com/articles/about-codeowners for syntax.
+
+* @dronedeploy/iam-security
