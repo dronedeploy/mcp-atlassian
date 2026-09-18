@@ -18,7 +18,7 @@ from mcp_atlassian.confluence import ConfluenceConfig, ConfluenceFetcher
 from mcp_atlassian.jira import JiraConfig, JiraFetcher
 from mcp_atlassian.servers.context import MainAppContext
 from mcp_atlassian.utils.oauth import OAuthConfig
-from mcp_atlassian.utils.urls import validate_url_for_ssrf
+from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
 if TYPE_CHECKING:
     from mcp_atlassian.confluence.config import (
@@ -228,9 +228,7 @@ def _create_and_validate(
         fetcher = spec.fetcher_class(config=config)
         if attach_ssrf_hook:
             session = spec.get_session(fetcher)
-            session.hooks["response"].append(
-                _make_ssrf_safe_hook(validate_url_for_ssrf)
-            )
+            session.hooks["response"].append(make_ssrf_redirect_hook())
         validation_data = spec.validate_fn(fetcher)
         spec.on_validated(
             fn_name,
@@ -270,34 +268,6 @@ def _resolve_oauth_access_token(fallback_token: str, service: str) -> str:
         return access_token.token
 
     return fallback_token
-
-
-def _make_ssrf_safe_hook(
-    validate_fn: Callable[[str], str | None],
-) -> Callable[..., Any]:
-    """Create a requests response hook that validates redirect URLs.
-
-    Blocks HTTP redirects that target internal/private IP addresses
-    to prevent SSRF via open-redirect chains.
-
-    Args:
-        validate_fn: A function that returns None if safe,
-            error string if blocked.
-
-    Returns:
-        A requests response hook function.
-    """
-
-    def hook(response: Any, **kwargs: Any) -> Any:
-        if response.is_redirect:
-            redirect_url = response.headers.get("Location", "")
-            error = validate_fn(redirect_url)
-            if error:
-                response.close()
-                raise ValueError(f"Redirect blocked (SSRF): {error}")
-        return response
-
-    return hook
 
 
 def _resolve_bearer_auth_type(
@@ -590,6 +560,7 @@ async def _get_fetcher(ctx: Context, spec: _ServiceSpec) -> Any:
                 user_config,
                 "basic",
                 user_email=user_email,
+                attach_ssrf_hook=True,
             )
 
         # --- Branch 3: OAuth / PAT with token ---
@@ -639,6 +610,7 @@ async def _get_fetcher(ctx: Context, spec: _ServiceSpec) -> Any:
                 user_config,
                 "oauth_pat",
                 user_email=user_email,
+                attach_ssrf_hook=True,
             )
 
         else:

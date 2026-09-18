@@ -11,6 +11,7 @@ from ..exceptions import MCPAtlassianAuthenticationError
 from ..utils.logging import get_masked_session_headers, log_config_param, mask_sensitive
 from ..utils.oauth import configure_oauth_session
 from ..utils.ssl import configure_ssl_verification
+from ..utils.urls import make_ssrf_redirect_hook
 from .config import ConfluenceConfig
 from .v2_adapter import ConfluenceV2Adapter
 
@@ -123,6 +124,10 @@ class ConfluenceClient:
             client_key=self.config.client_key,
             client_key_password=self.config.client_key_password,
         )
+
+        # Block redirects to internal/metadata hosts on every outbound request
+        # from this session, not just the per-user HTTP fetcher paths.
+        self.confluence._session.hooks["response"].append(make_ssrf_redirect_hook())
 
         # Proxy configuration
         proxies = {}

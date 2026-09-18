@@ -69,7 +69,9 @@ class TestAttachmentsMixin:
         mock_response.raise_for_status = MagicMock()
         attachments_mixin.jira._session.get.return_value = mock_response
 
-        download_path = "/tmp/test_file.txt"
+        # A subdirectory, not the working-directory root: downloads directly into
+        # cwd are refused (GHSA-6vmq-24h2-pj7j, importable-module overwrite risk).
+        download_path = "/tmp/downloads/test_file.txt"
         expected_path = os.path.abspath(download_path)
 
         # Mock file operations
@@ -121,20 +123,29 @@ class TestAttachmentsMixin:
             mock_exists.return_value = True
             mock_getsize.return_value = 12
             mock_isabs.return_value = False
+            # A subdirectory, not the working-directory root: downloads directly
+            # into cwd are refused (GHSA-6vmq-24h2-pj7j).
             mock_abspath.side_effect = lambda p: (
-                "/absolute/path/test_file.txt" if p == "test_file.txt" else p
+                "/absolute/path/downloads/test_file.txt"
+                if p == "downloads/test_file.txt"
+                else p
             )
 
             # Call the method with a relative path
             result = attachments_mixin.download_attachment(
-                "https://test.url/attachment", "test_file.txt"
+                "https://test.url/attachment", "downloads/test_file.txt"
             )
 
             # Assertions
             assert result is True
-            mock_isabs.assert_called_once_with("test_file.txt")
-            mock_abspath.assert_any_call("test_file.txt")
-            mock_file.assert_called_once_with("/absolute/path/test_file.txt", "wb")
+            # Path.resolve() (used by the working-directory-root guard) may
+            # call os.path.isabs/abspath internally too; assert the call we
+            # care about happened, not an exact count.
+            mock_isabs.assert_any_call("downloads/test_file.txt")
+            mock_abspath.assert_any_call("downloads/test_file.txt")
+            mock_file.assert_called_once_with(
+                "/absolute/path/downloads/test_file.txt", "wb"
+            )
 
     def test_download_attachment_no_url(self, attachments_mixin: AttachmentsMixin):
         """Test attachment download with no URL."""

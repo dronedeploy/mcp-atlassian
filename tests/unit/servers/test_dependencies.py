@@ -1474,10 +1474,9 @@ class TestSsrfProtection:
 
     def test_redirect_hook_blocks_internal(self) -> None:
         """Redirect to internal IP is blocked by SSRF hook."""
-        from mcp_atlassian.servers.dependencies import _make_ssrf_safe_hook
-        from mcp_atlassian.utils.urls import validate_url_for_ssrf
+        from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
-        hook = _make_ssrf_safe_hook(validate_url_for_ssrf)
+        hook = make_ssrf_redirect_hook()
 
         # Create a mock response that simulates a redirect
         mock_response = MagicMock()
@@ -1489,10 +1488,9 @@ class TestSsrfProtection:
 
     def test_redirect_hook_allows_safe(self) -> None:
         """Redirect to safe URL passes through."""
-        from mcp_atlassian.servers.dependencies import _make_ssrf_safe_hook
-        from mcp_atlassian.utils.urls import validate_url_for_ssrf
+        from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
-        hook = _make_ssrf_safe_hook(validate_url_for_ssrf)
+        hook = make_ssrf_redirect_hook()
 
         mock_response = MagicMock()
         mock_response.is_redirect = True
@@ -1508,10 +1506,9 @@ class TestSsrfProtection:
 
     def test_redirect_hook_ignores_non_redirect(self) -> None:
         """Non-redirect response passes through without checks."""
-        from mcp_atlassian.servers.dependencies import _make_ssrf_safe_hook
-        from mcp_atlassian.utils.urls import validate_url_for_ssrf
+        from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
-        hook = _make_ssrf_safe_hook(validate_url_for_ssrf)
+        hook = make_ssrf_redirect_hook()
 
         mock_response = MagicMock()
         mock_response.is_redirect = False

@@ -3,6 +3,7 @@
 import json
 import time
 import urllib.parse
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -440,36 +441,35 @@ class TestOAuthConfig:
         # Verify fallback to file was used
         mock_save_to_file.assert_called_once()
 
-    @patch("pathlib.Path.mkdir")
-    @patch("json.dump")
-    def test_save_tokens_to_file(self, mock_dump, mock_mkdir):
-        """Test _save_tokens_to_file method."""
-        # Mock open
-        mock_open = MagicMock()
-        with patch("builtins.open", mock_open):
-            config = OAuthConfig(
-                client_id="test-client-id",
-                client_secret="test-client-secret",
-                redirect_uri="https://example.com/callback",
-                scope="read:jira-work write:jira-work",
-                cloud_id="test-cloud-id",
-                refresh_token="test-refresh-token",
-                access_token="test-access-token",
-                expires_at=1234567890,
-            )
-            config._save_tokens_to_file()
+    def test_save_tokens_to_file(self, tmp_path, monkeypatch):
+        """Test _save_tokens_to_file method writes a real, owner-only file."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-            # Should create directory and save tokens
-            mock_mkdir.assert_called_once()
-            mock_open.assert_called_once()
-            mock_dump.assert_called_once()
+        config = OAuthConfig(
+            client_id="test-client-id",
+            client_secret="test-client-secret",
+            redirect_uri="https://example.com/callback",
+            scope="read:jira-work write:jira-work",
+            cloud_id="test-cloud-id",
+            refresh_token="test-refresh-token",
+            access_token="test-access-token",
+            expires_at=1234567890,
+        )
+        config._save_tokens_to_file()
 
-            # Check saved data
-            saved_data = mock_dump.call_args[0][0]
-            assert saved_data["refresh_token"] == "test-refresh-token"
-            assert saved_data["access_token"] == "test-access-token"
-            assert saved_data["expires_at"] == 1234567890
-            assert saved_data["cloud_id"] == "test-cloud-id"
+        token_dir = tmp_path / ".mcp-atlassian"
+        token_path = token_dir / "oauth-test-client-id.json"
+        assert token_path.is_file()
+
+        # Persisted tokens are secrets: owner-only permissions, independent of umask.
+        assert (token_dir.stat().st_mode & 0o777) == 0o700
+        assert (token_path.stat().st_mode & 0o777) == 0o600
+
+        saved_data = json.loads(token_path.read_text())
+        assert saved_data["refresh_token"] == "test-refresh-token"
+        assert saved_data["access_token"] == "test-access-token"
+        assert saved_data["expires_at"] == 1234567890
+        assert saved_data["cloud_id"] == "test-cloud-id"
 
     @patch("keyring.get_password")
     @patch.object(OAuthConfig, "_load_tokens_from_file")

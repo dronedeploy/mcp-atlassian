@@ -17,6 +17,7 @@ from mcp_atlassian.utils.logging import (
 )
 from mcp_atlassian.utils.oauth import configure_oauth_session
 from mcp_atlassian.utils.ssl import configure_ssl_verification
+from mcp_atlassian.utils.urls import make_ssrf_redirect_hook
 
 from ..models.jira.adf import markdown_to_adf
 from .config import JiraConfig
@@ -135,6 +136,10 @@ class JiraClient:
             client_key=self.config.client_key,
             client_key_password=self.config.client_key_password,
         )
+
+        # Block redirects to internal/metadata hosts on every outbound request
+        # from this session, not just the per-user HTTP fetcher paths.
+        self.jira._session.hooks["response"].append(make_ssrf_redirect_hook())
 
         # Proxy configuration
         proxies = {}

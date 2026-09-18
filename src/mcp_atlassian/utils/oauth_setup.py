@@ -8,6 +8,7 @@ This module helps with the OAuth 2.0 (3LO) authorization flow for Atlassian Clou
 4. Saves the tokens securely for later use by MCP Atlassian
 """
 
+import html
 import http.server
 import logging
 import os
@@ -122,7 +123,7 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
         <body>
             <h1>Atlassian OAuth Authorization</h1>
             <div class="message {"success" if status == 200 else "error"}">
-                <p>{message}</p>
+                <p>{html.escape(message)}</p>
             </div>
             <p>This window will automatically close in <span class="countdown">5</span> seconds...</p>
             <button onclick="window.close()">Close Window Now</button>
